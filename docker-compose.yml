@@ -1,0 +1,9 @@
+services:
+  script1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: script1-bz-sim:latest
+    volumes:
+      - ./output:/app/output
+    command: ["--output", "/app/output/bz_reaction.gif"]
