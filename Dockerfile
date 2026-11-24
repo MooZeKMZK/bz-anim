@@ -8,10 +8,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY src/bz-anim.py .
+COPY src/ ./src/
 
 RUN mkdir -p /app/output
 VOLUME ["/app/output"]
 
-ENTRYPOINT ["python", "script1.py"]
+ENTRYPOINT ["python", "src/bz-anim.py"]
 CMD ["--output", "/app/output/bz_reaction.gif"]

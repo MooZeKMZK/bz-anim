@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bz-anim"
+version = "0.1.0"
+description = "2D Belousov-Zhabotinsky reaction-diffusion simulator with CLI, Textual TUI, and PySide6 GUI"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0.0",
+    "pillow>=10.0.0",
+    "textual>=0.80.0",
+    "PySide6>=6.7.0",
+]
+
+[project.scripts]
+bz-anim = "bz_anim:main"
+bz-cli = "cli:run_cli"
+bz-tui = "tui:run_tui"
+bz-gui = "gui:run_gui"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["base", "cli", "tui", "gui", "theme", "bz_anim"]
