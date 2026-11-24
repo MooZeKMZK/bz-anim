@@ -159,16 +159,24 @@ def apply_theme(theme: ThemeConfig) -> ThemeConfig:
 def load_theme_file(path: str | Path | None = None) -> ThemeConfig:
     """Load and apply a TOML theme file.
 
-    If `path` is None, automatically checks `./theme.toml` and `<project_root>/theme.toml`.
+    If `path` is None, searches `./theme.toml`, `~/.config/bz-anim/theme.toml`,
+    `/etc/bz-anim/theme.toml`, and bundled package defaults.
     """
+    import os
+
     if path is not None:
         theme = ThemeConfig.from_toml(path)
         return apply_theme(theme)
 
-    candidates = [
-        Path.cwd() / DEFAULT_THEME_FILENAME,
-        Path(__file__).resolve().parent.parent / DEFAULT_THEME_FILENAME,
-    ]
+    candidates: list[Path] = [Path.cwd() / DEFAULT_THEME_FILENAME]
+    xdg_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_home:
+        candidates.append(Path(xdg_home) / "bz-anim" / DEFAULT_THEME_FILENAME)
+    candidates.append(Path.home() / ".config" / "bz-anim" / DEFAULT_THEME_FILENAME)
+    candidates.append(Path("/etc/bz-anim") / DEFAULT_THEME_FILENAME)
+    candidates.append(Path(__file__).resolve().parent / "defaults" / DEFAULT_THEME_FILENAME)
+    candidates.append(Path(__file__).resolve().parent.parent / DEFAULT_THEME_FILENAME)
+
     for candidate in candidates:
         if candidate.is_file():
             try:

@@ -1,0 +1,68 @@
+# Maintainer: moozek
+pkgbase=bz-anim
+pkgname=(
+  'python-bz-anim-core'
+  'bz-anim-cli'
+  'bz-anim-tui'
+  'bz-anim-gui'
+)
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="2D Belousov-Zhabotinsky reaction-diffusion simulator (core, CLI, Textual TUI, PySide6 GUI)"
+arch=('any')
+url="https://github.com/moozek/bz-anim"
+license=('MIT')
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+source=("${pkgbase}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "${srcdir}/${pkgbase}-${pkgver}"
+  for subpkg in core cli tui gui; do
+    pushd "packages/${subpkg}" > /dev/null
+    python -m build --wheel --no-isolation
+    popd > /dev/null
+  done
+}
+
+package_python-bz-anim-core() {
+  pkgdesc="Core 2D Belousov-Zhabotinsky simulation engine, TOML config, and Neo-Brutalist theme system"
+  depends=('python' 'python-numpy' 'python-pillow')
+  backup=('etc/bz-anim/config.toml' 'etc/bz-anim/theme.toml')
+
+  cd "${srcdir}/${pkgbase}-${pkgver}"
+  python -m installer --destdir="${pkgdir}" packages/core/dist/*.whl
+  install -Dm644 config.toml "${pkgdir}/etc/bz-anim/config.toml"
+  install -Dm644 theme.toml "${pkgdir}/etc/bz-anim/theme.toml"
+}
+
+package_bz-anim-cli() {
+  pkgdesc="Command-line interface (bz-cli) for the Belousov-Zhabotinsky reaction-diffusion simulator"
+  depends=('python-bz-anim-core')
+
+  cd "${srcdir}/${pkgbase}-${pkgver}"
+  python -m installer --destdir="${pkgdir}" packages/cli/dist/*.whl
+}
+
+package_bz-anim-tui() {
+  pkgdesc="Neo-Brutalist Textual terminal UI (bz-tui) for the Belousov-Zhabotinsky simulator"
+  depends=('python-bz-anim-core' 'bz-anim-cli' 'python-textual')
+
+  cd "${srcdir}/${pkgbase}-${pkgver}"
+  python -m installer --destdir="${pkgdir}" packages/tui/dist/*.whl
+}
+
+package_bz-anim-gui() {
+  pkgdesc="Neo-Brutalist PySide6 desktop GUI (bz-gui) for the Belousov-Zhabotinsky simulator"
+  depends=('python-bz-anim-core' 'bz-anim-cli' 'pyside6')
+
+  cd "${srcdir}/${pkgbase}-${pkgver}"
+  python -m installer --destdir="${pkgdir}" packages/gui/dist/*.whl
+  install -Dm644 packaging/desktop/bz-anim.desktop "${pkgdir}/usr/share/applications/bz-anim.desktop"
+  install -Dm644 packaging/desktop/bz-anim.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/bz-anim.svg"
+}

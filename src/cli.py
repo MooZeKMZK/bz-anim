@@ -70,6 +70,12 @@ def build_arg_parser(add_mode_flag: bool = False) -> argparse.ArgumentParser:
         "-f", "--framerate", type=int, default=None, help="Frames per second."
     )
     parser.add_argument(
+        "--palette-mode",
+        choices=["gradient", "ferroin"],
+        default=None,
+        help="Color lookup mode: 'gradient' (2-stop bg->rings) or 'ferroin' (multi-stop rust-red -> lavender -> cobalt/cyan LUT).",
+    )
+    parser.add_argument(
         "--bg-color", default=None, help="Background color (hex, name, or R,G,B)."
     )
     parser.add_argument(
@@ -140,6 +146,60 @@ def build_arg_parser(add_mode_flag: bool = False) -> argparse.ArgumentParser:
         help="Field quantization contrast exponent (>1 suppresses wake noise, default: 1.15).",
     )
     parser.add_argument(
+        "--seamless-loop",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable seamless temporal loop via chemical oxidation pulse wipe (default: enabled).",
+    )
+    parser.add_argument(
+        "--loop-wipe-ratio",
+        type=float,
+        default=None,
+        help="Fraction of loop duration used for the chemical oxidation pulse wipe in 0.05..0.95 (default: 0.28).",
+    )
+    parser.add_argument(
+        "--pulse-count",
+        type=int,
+        default=None,
+        help="Number of staggered anti-grid radial oxidation pulses on the 2D torus (default: 3).",
+    )
+    parser.add_argument(
+        "--pulse-speed",
+        type=float,
+        default=None,
+        help="Relative wave speed of the oxidation trigger pulse (default: 1.45).",
+    )
+    parser.add_argument(
+        "--pulse-sharpness",
+        type=float,
+        default=None,
+        help="Leading-edge oxidation sharpness of the pulse wavefront (default: 18.0).",
+    )
+    parser.add_argument(
+        "--pulse-decay",
+        type=float,
+        default=None,
+        help="Trailing refractory recovery decay rate behind the pulse crest (default: 4.0).",
+    )
+    parser.add_argument(
+        "--pulse-noise-amp",
+        type=float,
+        default=None,
+        help="Amplitude of 4D toroidal Perlin/Fourier wavefront distortion noise (0 to disable, default: 0.08).",
+    )
+    parser.add_argument(
+        "--pulse-noise-freq",
+        type=int,
+        default=None,
+        help="Base spatial frequency of 4D toroidal wavefront distortion noise (default: 3).",
+    )
+    parser.add_argument(
+        "--tileable",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enforce strict 2D torus spatial wrap-around across all simulation, pulse, and post-processing passes (default: enabled).",
+    )
+    parser.add_argument(
         "--scanline-smooth",
         type=float,
         default=None,
@@ -202,6 +262,7 @@ def args_to_config(args: argparse.Namespace) -> SimulationConfig:
         "size": "size",
         "length": "length",
         "framerate": "framerate",
+        "palette_mode": "palette_mode",
         "bg_color": "bg_color",
         "rings_color": "rings_color",
         "speed": "speed",
@@ -215,6 +276,15 @@ def args_to_config(args: argparse.Namespace) -> SimulationConfig:
         "pixel_size": "pixel_size",
         "palette_gamma": "palette_gamma",
         "contrast_gamma": "contrast_gamma",
+        "seamless_loop": "seamless_loop",
+        "loop_wipe_ratio": "loop_wipe_ratio",
+        "pulse_count": "pulse_count",
+        "pulse_speed": "pulse_speed",
+        "pulse_sharpness": "pulse_sharpness",
+        "pulse_decay": "pulse_decay",
+        "pulse_noise_amp": "pulse_noise_amp",
+        "pulse_noise_freq": "pulse_noise_freq",
+        "tileable": "tileable",
         "scanline_smooth": "scanline_smooth",
         "bg_snap_threshold": "bg_snap_threshold",
         "despeckle": "despeckle",

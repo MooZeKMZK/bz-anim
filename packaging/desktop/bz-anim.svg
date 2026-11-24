@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Neo-Brutalist Hard Drop Shadow & Frame -->
+  <rect x="10" y="10" width="112" height="112" fill="#161821"/>
+  <rect x="4" y="4" width="112" height="112" fill="#1e212d" stroke="#e8e4dc" stroke-width="6"/>
+  <!-- Top Neo-Brutalist Header Strip -->
+  <rect x="4" y="4" width="112" height="22" fill="#e9c46a" stroke="#e8e4dc" stroke-width="6"/>
+  <rect x="12" y="11" width="8" height="8" fill="#161821"/>
+  <!-- Concentric BZ Wavefront Rings -->
+  <circle cx="60" cy="70" r="36" fill="none" stroke="#5bc0be" stroke-width="7"/>
+  <circle cx="60" cy="70" r="23" fill="none" stroke="#e07a5f" stroke-width="6"/>
+  <circle cx="60" cy="70" r="11" fill="#81b29a"/>
+</svg>

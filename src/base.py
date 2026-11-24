@@ -28,6 +28,7 @@ class SimulationConfig:
     framerate: int = 20
     bg_color: ColorLike = "#0b132b"
     rings_color: ColorLike = "#00f5d4"
+    palette_mode: str = "gradient"  # "gradient" or "ferroin"
     speed: float = 1.0
     alpha: float = 1.2
     beta: float = 1.0
@@ -45,6 +46,15 @@ class SimulationConfig:
     snap_steps: bool = True
     optimize: bool = True
     diff_threshold: int = 1
+    seamless_loop: bool = True
+    loop_wipe_ratio: float = 0.28
+    pulse_count: int = 3
+    pulse_speed: float = 1.45
+    pulse_sharpness: float = 18.0
+    pulse_decay: float = 4.0
+    pulse_noise_amp: float = 0.08
+    pulse_noise_freq: int = 3
+    tileable: bool = True
 
     def validate(self) -> None:
         """Validate all simulation parameters and raise ValueError if invalid."""
@@ -66,6 +76,10 @@ class SimulationConfig:
             raise ValueError(f"palette_gamma must be positive, got {self.palette_gamma}")
         if self.contrast_gamma <= 0:
             raise ValueError(f"contrast_gamma must be positive, got {self.contrast_gamma}")
+        if self.palette_mode not in {"gradient", "ferroin"}:
+            raise ValueError(
+                f"palette_mode must be 'gradient' or 'ferroin', got {self.palette_mode!r}"
+            )
         if not (0.0 <= self.scanline_smooth <= 0.5):
             raise ValueError(
                 f"scanline_smooth must be between 0.0 and 0.5, got {self.scanline_smooth}"
@@ -76,13 +90,33 @@ class SimulationConfig:
             )
         if self.diff_threshold < 0:
             raise ValueError(f"diff_threshold must be non-negative, got {self.diff_threshold}")
+        if not (0.05 <= self.loop_wipe_ratio <= 0.95):
+            raise ValueError(
+                f"loop_wipe_ratio must be between 0.05 and 0.95, got {self.loop_wipe_ratio}"
+            )
+        if self.pulse_count < 1:
+            raise ValueError(f"pulse_count must be at least 1, got {self.pulse_count}")
+        if self.pulse_speed <= 0:
+            raise ValueError(f"pulse_speed must be positive, got {self.pulse_speed}")
+        if self.pulse_sharpness <= 0:
+            raise ValueError(f"pulse_sharpness must be positive, got {self.pulse_sharpness}")
+        if self.pulse_decay <= 0:
+            raise ValueError(f"pulse_decay must be positive, got {self.pulse_decay}")
+        if self.pulse_noise_amp < 0:
+            raise ValueError(
+                f"pulse_noise_amp must be non-negative, got {self.pulse_noise_amp}"
+            )
+        if self.pulse_noise_freq < 1:
+            raise ValueError(
+                f"pulse_noise_freq must be at least 1, got {self.pulse_noise_freq}"
+            )
         parse_size(self.size)
         parse_color(self.bg_color)
         parse_color(self.rings_color)
 
     @classmethod
     def from_toml(cls, path: str | Path) -> SimulationConfig:
-        """Load a `SimulationConfig` from a TOML file (flat or sectioned into `[canvas]`, `[palette]`, `[kinetics]`, `[compression]`)."""
+        """Load a `SimulationConfig` from a TOML file (flat or sectioned into `[canvas]`, `[palette]`, `[kinetics]`, `[loop]`, `[compression]`)."""
         p = Path(path)
         with p.open("rb") as f:
             raw = tomllib.load(f)
@@ -99,6 +133,7 @@ class SimulationConfig:
             "output": "output_path",
             "warmup": "warmup_steps",
             "raster_size": "pixel_size",
+            "wipe_ratio": "loop_wipe_ratio",
         }
         for alias_k, target_k in alias_map.items():
             if alias_k in merged and target_k not in merged:
@@ -138,8 +173,10 @@ class SimulationConfig:
             f'output_path = "{self.output_path}"\n'
             f'size = "{w}x{h}"\n'
             f"length = {float(self.length)}\n"
-            f"framerate = {int(self.framerate)}\n\n"
+            f"framerate = {int(self.framerate)}\n"
+            f"tileable = {'true' if self.tileable else 'false'}\n\n"
             "[palette]\n"
+            f'palette_mode = "{self.palette_mode}"  # "gradient" or "ferroin"\n'
             f'bg_color = "{bg_hex}"\n'
             f'rings_color = "{rings_hex}"\n'
             f"colors = {int(self.colors)}\n"
@@ -154,6 +191,15 @@ class SimulationConfig:
             f"warmup_steps = {int(self.warmup_steps)}\n"
             f"seed = {seed_val}  # Use -1 for random seed\n"
             f"{spf_line}\n"
+            "[loop]\n"
+            f"seamless_loop = {'true' if self.seamless_loop else 'false'}\n"
+            f"loop_wipe_ratio = {float(self.loop_wipe_ratio)}\n"
+            f"pulse_count = {int(self.pulse_count)}\n"
+            f"pulse_speed = {float(self.pulse_speed)}\n"
+            f"pulse_sharpness = {float(self.pulse_sharpness)}\n"
+            f"pulse_decay = {float(self.pulse_decay)}\n"
+            f"pulse_noise_amp = {float(self.pulse_noise_amp)}\n"
+            f"pulse_noise_freq = {int(self.pulse_noise_freq)}\n\n"
             "[compression]\n"
             f"optimize = {'true' if self.optimize else 'false'}\n"
             f"despeckle = {'true' if self.despeckle else 'false'}\n"
@@ -171,16 +217,27 @@ class SimulationConfig:
         return p
 
 
+def get_default_config_candidates(filename: str) -> list[Path]:
+    """Return ordered candidate paths for `config.toml` or `theme.toml` (CWD -> XDG -> /etc/bz-anim -> repo/package)."""
+    import os
+
+    candidates: list[Path] = [Path.cwd() / filename]
+    xdg_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_home:
+        candidates.append(Path(xdg_home) / "bz-anim" / filename)
+    candidates.append(Path.home() / ".config" / "bz-anim" / filename)
+    candidates.append(Path("/etc/bz-anim") / filename)
+    candidates.append(Path(__file__).resolve().parent / "defaults" / filename)
+    candidates.append(Path(__file__).resolve().parent.parent / filename)
+    return candidates
+
+
 def load_config_file(path: str | Path | None = None) -> SimulationConfig:
-    """Load a `SimulationConfig` from `path`, or auto-detect `./config.toml` if `path` is None."""
+    """Load a `SimulationConfig` from `path`, or search CWD -> XDG -> `/etc/bz-anim` -> package defaults."""
     if path is not None:
         return SimulationConfig.from_toml(path)
 
-    candidates = [
-        Path.cwd() / DEFAULT_CONFIG_FILENAME,
-        Path(__file__).resolve().parent.parent / DEFAULT_CONFIG_FILENAME,
-    ]
-    for candidate in candidates:
+    for candidate in get_default_config_candidates(DEFAULT_CONFIG_FILENAME):
         if candidate.is_file():
             try:
                 return SimulationConfig.from_toml(candidate)
@@ -236,16 +293,51 @@ def build_palette_array(
     rings_rgb: tuple[int, int, int],
     gamma: float = 1.15,
     num_colors: int = 256,
+    palette_mode: str = "gradient",
 ) -> np.ndarray:
-    """Build an (N, 3) uint8 RGB palette array interpolating from bg_rgb to rings_rgb."""
+    """Build an (N, 3) uint8 RGB palette array.
+
+    Supports two chemical color lookup modes:
+    - `'gradient'`: 2-stop gamma-curved ramp from `bg_rgb` to `rings_rgb`.
+    - `'ferroin'`: Multi-stop 1D LUT inspired by ferroin-catalyzed BZ reactions
+      (deep rust-red resting medium -> pale lavender/white transitional fringes ->
+      bright cobalt-blue/cyan oxidized wavefronts). If custom `bg_rgb` / `rings_rgb`
+      are provided, they anchor the resting medium and peak oxidized wavefront while
+      preserving the pale lavender transitional fringe.
+    """
     if gamma <= 0:
         raise ValueError(f"gamma must be positive, got {gamma}")
     if not (2 <= num_colors <= 256):
         raise ValueError(f"num_colors must be in 2..256, got {num_colors}")
     t = np.linspace(0.0, 1.0, num_colors, dtype=np.float32) ** gamma
-    bg = np.array(bg_rgb, dtype=np.float32)
-    fg = np.array(rings_rgb, dtype=np.float32)
-    ramp = np.clip(np.round(bg[None, :] + (fg - bg)[None, :] * t[:, None]), 0, 255).astype(np.uint8)
+
+    if palette_mode == "ferroin":
+        default_bg = (11, 19, 43)
+        default_fg = (0, 245, 212)
+        rest_rgb = (78, 18, 16) if bg_rgb == default_bg else bg_rgb
+        peak_rgb = (18, 228, 255) if rings_rgb == default_fg else rings_rgb
+        stops_t = np.array([0.0, 0.35, 0.62, 0.84, 1.0], dtype=np.float32)
+        stops_rgb = np.array(
+            [
+                rest_rgb,            # Deep rust-red resting medium
+                (148, 48, 42),       # Warm ferric/ferroin terracotta transition
+                (234, 218, 248),     # Pale lavender / white transitional fringe
+                (28, 118, 232),      # Rich cobalt-blue oxidized wave body
+                peak_rgb,            # Bright cyan oxidized wavefront crest
+            ],
+            dtype=np.float32,
+        )
+        r = np.interp(t, stops_t, stops_rgb[:, 0])
+        g = np.interp(t, stops_t, stops_rgb[:, 1])
+        b = np.interp(t, stops_t, stops_rgb[:, 2])
+        ramp = np.clip(np.round(np.stack([r, g, b], axis=1)), 0, 255).astype(np.uint8)
+    else:
+        bg = np.array(bg_rgb, dtype=np.float32)
+        fg = np.array(rings_rgb, dtype=np.float32)
+        ramp = np.clip(
+            np.round(bg[None, :] + (fg - bg)[None, :] * t[:, None]), 0, 255
+        ).astype(np.uint8)
+
     _, first_idx = np.unique(ramp, axis=0, return_index=True)
     return ramp[np.sort(first_idx)]
 
@@ -255,9 +347,20 @@ def build_palette(
     rings_rgb: tuple[int, int, int],
     gamma: float = 1.15,
     num_colors: int = 256,
+    palette_mode: str = "gradient",
 ) -> list[int]:
     """Build a flat RGB palette list (up to 256 entries) interpolating from bg_rgb to rings_rgb."""
-    return build_palette_array(bg_rgb, rings_rgb, gamma=gamma, num_colors=num_colors).flatten().tolist()
+    return (
+        build_palette_array(
+            bg_rgb,
+            rings_rgb,
+            gamma=gamma,
+            num_colors=num_colors,
+            palette_mode=palette_mode,
+        )
+        .flatten()
+        .tolist()
+    )
 
 
 def _moore_average(grid: np.ndarray) -> np.ndarray:
@@ -325,8 +428,180 @@ def _step_bz(
     return a_next, b_next, c_next
 
 
+def _toroidal_4d_noise(
+    height: int,
+    width: int,
+    rng: np.random.Generator,
+    base_freq: int = 3,
+    octaves: int = 3,
+) -> np.ndarray:
+    """Generate smooth, strictly periodic 2D noise by sampling 4D Fourier/Perlin modes on a 2D torus.
+
+    Maps normalized `[0, 1)` coordinates `(u, v)` onto the 4D torus:
+    `(cos(2*pi*u), sin(2*pi*u), cos(2*pi*v), sin(2*pi*v))`
+    so the resulting distortion field wraps seamlessly across both X and Y boundaries.
+    """
+    u = np.arange(width, dtype=np.float32) / float(max(1, width))
+    v = np.arange(height, dtype=np.float32) / float(max(1, height))
+    uu, vv = np.meshgrid(u, v)
+
+    two_pi = np.float32(2.0 * np.pi)
+    noise = np.zeros((height, width), dtype=np.float32)
+    total_weight = 0.0
+
+    for octave in range(octaves):
+        freq = max(1, base_freq * (2**octave))
+        weight = 1.0 / (2.0**octave)
+        total_weight += weight
+
+        # Project 4D torus coordinates (cos(2pi*k*u), sin(2pi*k*u), cos(2pi*m*v), sin(2pi*m*v))
+        # with coupled random 4D gradient vectors for isotropic periodic warping
+        for _ in range(4):
+            kx = int(rng.integers(1, freq + 1)) * int(rng.choice([-1, 1]))
+            ky = int(rng.integers(1, freq + 1)) * int(rng.choice([-1, 1]))
+            g4 = rng.normal(0.0, 1.0, size=4).astype(np.float32)
+            g4 /= max(1e-6, float(np.linalg.norm(g4)))
+            phase = np.float32(rng.uniform(0.0, 2.0 * np.pi))
+
+            torus_proj = (
+                g4[0] * np.cos(two_pi * kx * uu)
+                + g4[1] * np.sin(two_pi * kx * uu)
+                + g4[2] * np.cos(two_pi * ky * vv)
+                + g4[3] * np.sin(two_pi * ky * vv)
+            )
+            noise += np.float32(weight) * np.sin(two_pi * torus_proj + phase)
+
+    if total_weight > 0:
+        noise /= np.float32(total_weight)
+    max_abs = float(np.max(np.abs(noise)))
+    if max_abs > 1e-6:
+        noise /= np.float32(max_abs)
+    return noise
+
+
+def _generate_pulse_origins(
+    pulse_count: int,
+    rng: np.random.Generator,
+) -> list[tuple[float, float, float]]:
+    """Generate anti-grid staggered pulse origins `(u0, v0, delay)` in normalized `[0, 1)` torus space.
+
+    Instead of a single centered radial pulse (which creates an obvious polka-dot grid when tiled),
+    places 2-3+ staggered radial pulses at golden-ratio offset coordinates within the tile so their
+    expanding rings collide and merge organically across tile boundaries.
+    """
+    count = max(1, pulse_count)
+    u_base = float(rng.uniform(0.0, 1.0))
+    v_base = float(rng.uniform(0.0, 1.0))
+    # Golden-ratio quasi-random offsets in 2D prevent collinear or grid-aligned origins
+    phi1 = 0.618033988749895
+    phi2 = 0.7548776662466927
+    origins: list[tuple[float, float, float]] = []
+    for i in range(count):
+        jitter_u = float(rng.uniform(-0.06, 0.06)) if count > 1 else 0.0
+        jitter_v = float(rng.uniform(-0.06, 0.06)) if count > 1 else 0.0
+        u0 = (u_base + i * phi1 + jitter_u) % 1.0
+        v0 = (v_base + i * phi2 + jitter_v) % 1.0
+        # Slight temporal stagger in [0, 0.14] so rings collide asymmetrically
+        delay = (i / float(max(1, count))) * 0.14 if count > 1 else 0.0
+        origins.append((u0, v0, delay))
+    return origins
+
+
+def _build_toroidal_arrival_map(
+    height: int,
+    width: int,
+    pulse_count: int,
+    noise_amp: float,
+    noise_freq: int,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, float]:
+    """Compute a tileable normalized arrival-time field for the chemical oxidation pulse wipe.
+
+    Uses wrapped toroidal distance from staggered origins plus 4D torus noise distortion:
+      `dx = min(|x - x0|, W - |x - x0|)`
+      `dy = min(|y - y0|, H - |y - y0|)`
+      `dist = sqrt(dx^2 + dy^2)`
+    """
+    yy, xx = np.ogrid[:height, :width]
+    xx_f = xx.astype(np.float32)
+    yy_f = yy.astype(np.float32)
+    diag = float(np.hypot(width * 0.5, height * 0.5))
+    inv_diag = 1.0 / max(1.0, diag)
+
+    origins = _generate_pulse_origins(pulse_count, rng)
+    arrival = np.full((height, width), np.inf, dtype=np.float32)
+
+    for u0, v0, delay in origins:
+        x0 = np.float32(u0 * width)
+        y0 = np.float32(v0 * height)
+        abs_dx = np.abs(xx_f - x0)
+        abs_dy = np.abs(yy_f - y0)
+        dx = np.minimum(abs_dx, np.float32(width) - abs_dx)
+        dy = np.minimum(abs_dy, np.float32(height) - abs_dy)
+        norm_dist = np.sqrt(dx * dx + dy * dy) * np.float32(inv_diag)
+        arrival = np.minimum(arrival, norm_dist + np.float32(delay))
+
+    if noise_amp > 0.0:
+        torus_noise = _toroidal_4d_noise(
+            height, width, rng, base_freq=max(1, noise_freq)
+        )
+        # Attenuate distortion right at the origin core so nucleation points stay clean
+        core_atten = np.clip(arrival / 0.15, 0.0, 1.0)
+        arrival = np.maximum(
+            0.0, arrival + np.float32(noise_amp) * torus_noise * core_atten
+        )
+
+    max_arrival = float(np.max(arrival))
+    return arrival, max(1e-4, max_arrival)
+
+
+def _blend_pulse_wipe_field(
+    a_tail: np.ndarray,
+    a_head: np.ndarray,
+    arrival_map: np.ndarray,
+    max_arrival: float,
+    wipe_progress: float,
+    pulse_speed: float = 1.45,
+    pulse_sharpness: float = 18.0,
+    pulse_decay: float = 4.0,
+) -> np.ndarray:
+    """Blend tail and head scalar concentration fields across an asymmetric oxidation trigger wave.
+
+    - Ahead of the wave (`s < 0`): samples `a_tail` (frames `N` to `N + K - 1`).
+    - Behind the wave (`s > 0`): reveals `a_head` (frames `0` to `K - 1`).
+    - On the wave crest (`s == 0`): drives scalar chemical concentration to peak oxidation (`1.0`)
+      with a razor-sharp leading edge and a gradual trailing recovery tail.
+    """
+    # Scale wave radius so that at wipe_progress=0 the entire canvas is ahead of the wave (a_tail)
+    # and at wipe_progress=1 the trailing recovery tail has completely settled to a_head.
+    lead_margin = 3.5 / max(1.0, pulse_sharpness)
+    tail_margin = 4.2 / max(0.5, pulse_decay)
+    total_span = max_arrival + lead_margin + tail_margin
+    wave_radius = -lead_margin + float(np.clip(wipe_progress, 0.0, 1.0)) * total_span
+
+    # Signed phase distance behind the wave crest ( scaled by pulse_speed )
+    s = (np.float32(wave_radius) - arrival_map) * np.float32(max(0.5, pulse_speed))
+
+    # Smooth sigmoid state handoff centered right under the peak oxidation crest
+    handoff = (1.0 / (1.0 + np.exp(np.clip(-pulse_sharpness * s, -40.0, 40.0)))).astype(
+        np.float32
+    )
+    base_field = (1.0 - handoff) * a_tail + handoff * a_head
+
+    # Asymmetric oxidation flash profile:
+    # - Razor-sharp Gaussian leading edge ahead of crest (s < 0)
+    # - Slower exponential refractory recovery tail behind crest (s >= 0)
+    lead_profile = np.exp(-np.square(np.minimum(s, 0.0) * np.float32(pulse_sharpness)))
+    trail_profile = np.exp(-np.maximum(s, 0.0) * np.float32(pulse_decay))
+    crest_flash = np.where(s < 0.0, lead_profile, trail_profile).astype(np.float32)
+
+    # Push scalar concentration to peak oxidation (1.0) on the wave crest before LUT mapping
+    blended = base_field + crest_flash * (1.0 - base_field)
+    return np.clip(blended, 0.0, 1.0).astype(np.float32)
+
+
 def _downsample_field(a: np.ndarray, pixel_size: int) -> np.ndarray:
-    """Average concentration field `a` over `pixel_size x pixel_size` blocks."""
+    """Average concentration field `a` over `pixel_size x pixel_size` blocks with periodic wrap padding."""
     if pixel_size < 1:
         raise ValueError(f"pixel_size must be at least 1, got {pixel_size}")
     if pixel_size == 1:
@@ -336,7 +611,7 @@ def _downsample_field(a: np.ndarray, pixel_size: int) -> np.ndarray:
     pad_h = (-height) % pixel_size
     pad_w = (-width) % pixel_size
     if pad_h or pad_w:
-        a = np.pad(a, ((0, pad_h), (0, pad_w)), mode="edge")
+        a = np.pad(a, ((0, pad_h), (0, pad_w)), mode="wrap")
     bh = a.shape[0] // pixel_size
     bw = a.shape[1] // pixel_size
     return a.reshape(bh, pixel_size, bw, pixel_size).mean(axis=(1, 3))
@@ -369,8 +644,13 @@ def _optimize_cell_deltas(
     diff_threshold: int,
     bg_snap_threshold: float = 0.25,
     despeckle: bool = True,
+    tileable: bool = True,
 ) -> np.ndarray:
-    """Stabilize inter-frame cell deltas to maximize GIF LZW horizontal run lengths."""
+    """Stabilize inter-frame cell deltas to maximize GIF LZW horizontal run lengths.
+
+    When `tileable=True`, uses toroidal (`np.roll`) neighborhood checks so delta despeckling
+    never introduces seam discrepancies along the top/bottom or left/right canvas borders.
+    """
     diff = np.abs(raw_indices.astype(np.int16) - canvas_indices.astype(np.int16))
     unchanged = diff <= diff_threshold
     if bg_snap_threshold > 0:
@@ -385,26 +665,50 @@ def _optimize_cell_deltas(
         return np.where(unchanged, canvas_indices, raw_indices)
 
     changed = ~unchanged
-    h_neighbors = np.zeros(changed.shape, dtype=np.int8)
-    h_neighbors[:, 1:] += changed[:, :-1]
-    h_neighbors[:, :-1] += changed[:, 1:]
-    v_neighbors = np.zeros(changed.shape, dtype=np.int8)
-    v_neighbors[1:, :] += changed[:-1, :]
-    v_neighbors[:-1, :] += changed[1:, :]
+    if tileable:
+        h_neighbors = (
+            np.roll(changed, 1, axis=1).astype(np.int8)
+            + np.roll(changed, -1, axis=1).astype(np.int8)
+        )
+        v_neighbors = (
+            np.roll(changed, 1, axis=0).astype(np.int8)
+            + np.roll(changed, -1, axis=0).astype(np.int8)
+        )
+    else:
+        h_neighbors = np.zeros(changed.shape, dtype=np.int8)
+        h_neighbors[:, 1:] += changed[:, :-1]
+        h_neighbors[:, :-1] += changed[:, 1:]
+        v_neighbors = np.zeros(changed.shape, dtype=np.int8)
+        v_neighbors[1:, :] += changed[:-1, :]
+        v_neighbors[:-1, :] += changed[1:, :]
+
     isolated = (h_neighbors == 0) & ((v_neighbors == 0) | (diff <= diff_threshold + 1))
     unchanged |= isolated
 
     cell_indices = np.where(unchanged, canvas_indices, raw_indices)
 
     changed_now = cell_indices != canvas_indices
-    same_lr = np.zeros(cell_indices.shape, dtype=bool)
-    same_lr[:, 1:-1] = (
-        changed_now[:, :-2]
-        & changed_now[:, 2:]
-        & (~changed_now[:, 1:-1])
-        & (cell_indices[:, :-2] == cell_indices[:, 2:])
-        & (raw_indices[:, 1:-1] == cell_indices[:, :-2])
-    )
+    if tileable:
+        left_chg = np.roll(changed_now, 1, axis=1)
+        right_chg = np.roll(changed_now, -1, axis=1)
+        left_idx = np.roll(cell_indices, 1, axis=1)
+        right_idx = np.roll(cell_indices, -1, axis=1)
+        same_lr = (
+            left_chg
+            & right_chg
+            & (~changed_now)
+            & (left_idx == right_idx)
+            & (raw_indices == left_idx)
+        )
+    else:
+        same_lr = np.zeros(cell_indices.shape, dtype=bool)
+        same_lr[:, 1:-1] = (
+            changed_now[:, :-2]
+            & changed_now[:, 2:]
+            & (~changed_now[:, 1:-1])
+            & (cell_indices[:, :-2] == cell_indices[:, 2:])
+            & (raw_indices[:, 1:-1] == cell_indices[:, :-2])
+        )
     return np.where(same_lr, raw_indices, cell_indices)
 
 
@@ -444,6 +748,10 @@ class BZSimulator:
         self.a_prev: np.ndarray = np.zeros((1, 1), dtype=np.float32)
         self.curr_step: int = 0
         self.sim_time: float = 0.0
+        self.frame_idx: int = 0
+        self._head_fields: list[np.ndarray] = []
+        self._arrival_map: np.ndarray = np.zeros((1, 1), dtype=np.float32)
+        self._max_arrival: float = 1.0
         self.reset()
 
     def update_visual_params(self) -> None:
@@ -460,6 +768,7 @@ class BZSimulator:
             self.rings_rgb,
             gamma=self.config.palette_gamma,
             num_colors=max_shades,
+            palette_mode=self.config.palette_mode,
         )
         self.palette_flat = self.palette_array.flatten().tolist()
         self.num_shades = len(self.palette_array)
@@ -468,13 +777,17 @@ class BZSimulator:
             self.rings_rgb,
             gamma=self.config.palette_gamma,
             num_colors=max(self.num_shades, 64),
+            palette_mode=self.config.palette_mode,
         )
         self._tui_palette_16 = build_palette_array(
             self.bg_rgb,
             self.rings_rgb,
             gamma=self.config.palette_gamma,
             num_colors=min(max(self.num_shades, 4), 6),
+            palette_mode=self.config.palette_mode,
         )
+        if len(self.palette_array) > 0:
+            self.bg_rgb = tuple(int(c) for c in self.palette_array[0])  # type: ignore[assignment]
 
     def reset(self, config: SimulationConfig | None = None) -> None:
         """Re-initialize the chemical grids and run warmup steps."""
@@ -498,6 +811,16 @@ class BZSimulator:
         self.a_prev = self.a
         self.curr_step = 0
         self.sim_time = 0.0
+        self.frame_idx = 0
+        self._head_fields = [self.a.copy()]
+        self._arrival_map, self._max_arrival = _build_toroidal_arrival_map(
+            self.height,
+            self.width,
+            pulse_count=self.config.pulse_count,
+            noise_amp=self.config.pulse_noise_amp,
+            noise_freq=self.config.pulse_noise_freq,
+            rng=rng,
+        )
 
     @property
     def step_advance(self) -> float:
@@ -506,9 +829,21 @@ class BZSimulator:
             return self.config.steps_per_frame * self.config.speed
         return (BASE_STEPS_PER_SECOND * self.config.speed) / self.config.framerate
 
+    def _raw_current_field(self) -> np.ndarray:
+        """Return the raw unblended interpolated `a` concentration field."""
+        if (
+            self.config.optimize
+            and self.config.snap_steps
+            and self.step_advance <= 1.0
+        ) or self.curr_step == 0:
+            return self.a
+        frac = self.sim_time - (self.curr_step - 1)
+        return (1.0 - frac) * self.a_prev + frac * self.a
+
     def step_frame(self) -> np.ndarray:
-        """Advance simulation by one frame interval and return the interpolated `a` concentration field."""
+        """Advance simulation by one frame interval and return the active `a` concentration field."""
         self.sim_time += self.step_advance
+        self.frame_idx += 1
         target_step = int(np.ceil(self.sim_time))
         while self.curr_step < target_step:
             self.a_prev = self.a
@@ -522,25 +857,35 @@ class BZSimulator:
             )
             self.curr_step += 1
 
-        if (
-            self.config.optimize
-            and self.config.snap_steps
-            and self.step_advance <= 1.0
-        ) or self.curr_step == 0:
-            return self.a
-        frac = self.sim_time - (self.curr_step - 1)
-        return (1.0 - frac) * self.a_prev + frac * self.a
+        raw_a = self._raw_current_field()
+        if not self.config.seamless_loop:
+            return raw_a
+
+        n_frames = max(4, int(round(self.config.length * self.config.framerate)))
+        k_frames = max(2, min(n_frames - 1, int(round(n_frames * self.config.loop_wipe_ratio))))
+        cycle_idx = self.frame_idx % n_frames
+        if len(self._head_fields) < k_frames:
+            self._head_fields.append(raw_a.copy())
+
+        wipe_start = n_frames - k_frames
+        if cycle_idx >= wipe_start and len(self._head_fields) >= k_frames:
+            k_idx = cycle_idx - wipe_start
+            wipe_progress = (k_idx + 0.5) / float(k_frames)
+            return _blend_pulse_wipe_field(
+                a_tail=raw_a,
+                a_head=self._head_fields[k_idx],
+                arrival_map=self._arrival_map,
+                max_arrival=self._max_arrival,
+                wipe_progress=wipe_progress,
+                pulse_speed=self.config.pulse_speed,
+                pulse_sharpness=self.config.pulse_sharpness,
+                pulse_decay=self.config.pulse_decay,
+            )
+        return raw_a
 
     def current_field(self) -> np.ndarray:
         """Return the current interpolated `a` concentration field without advancing."""
-        if (
-            self.config.optimize
-            and self.config.snap_steps
-            and self.step_advance <= 1.0
-        ) or self.curr_step == 0:
-            return self.a
-        frac = self.sim_time - (self.curr_step - 1)
-        return (1.0 - frac) * self.a_prev + frac * self.a
+        return self._raw_current_field()
 
     def render_rgb_array(
         self,
@@ -672,6 +1017,7 @@ def simulate_bz_reaction(
     framerate: int = 20,
     bg_color: ColorLike = "#0b132b",
     rings_color: ColorLike = "#00f5d4",
+    palette_mode: str = "gradient",
     speed: float = 1.0,
     alpha: float = 1.2,
     beta: float = 1.0,
@@ -689,9 +1035,18 @@ def simulate_bz_reaction(
     snap_steps: bool = True,
     optimize: bool = True,
     diff_threshold: int = 1,
+    seamless_loop: bool = True,
+    loop_wipe_ratio: float = 0.28,
+    pulse_count: int = 3,
+    pulse_speed: float = 1.45,
+    pulse_sharpness: float = 18.0,
+    pulse_decay: float = 4.0,
+    pulse_noise_amp: float = 0.08,
+    pulse_noise_freq: int = 3,
+    tileable: bool = True,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> str:
-    """Simulate a 2D Belousov-Zhabotinsky reaction and save it as an animated GIF."""
+    """Simulate a 2D Belousov-Zhabotinsky reaction and save it as a seamlessly looping, tileable animated GIF."""
     config = SimulationConfig(
         output_path=output_path,
         size=size,
@@ -699,6 +1054,7 @@ def simulate_bz_reaction(
         framerate=framerate,
         bg_color=bg_color,
         rings_color=rings_color,
+        palette_mode=palette_mode,
         speed=speed,
         alpha=alpha,
         beta=beta,
@@ -716,6 +1072,15 @@ def simulate_bz_reaction(
         snap_steps=snap_steps,
         optimize=optimize,
         diff_threshold=diff_threshold,
+        seamless_loop=seamless_loop,
+        loop_wipe_ratio=loop_wipe_ratio,
+        pulse_count=pulse_count,
+        pulse_speed=pulse_speed,
+        pulse_sharpness=pulse_sharpness,
+        pulse_decay=pulse_decay,
+        pulse_noise_amp=pulse_noise_amp,
+        pulse_noise_freq=pulse_noise_freq,
+        tileable=tileable,
     )
     config.validate()
 
@@ -724,11 +1089,22 @@ def simulate_bz_reaction(
     rings_rgb = parse_color(rings_color)
     max_shades = colors - 1 if optimize and colors > 2 else colors
     palette = build_palette(
-        bg_rgb, rings_rgb, gamma=palette_gamma, num_colors=max_shades
+        bg_rgb,
+        rings_rgb,
+        gamma=palette_gamma,
+        num_colors=max_shades,
+        palette_mode=palette_mode,
     )
     num_shades = len(palette) // 3
 
     total_frames = max(1, int(round(length * framerate)))
+    wipe_frames = (
+        max(1, min(total_frames, int(round(total_frames * loop_wipe_ratio))))
+        if seamless_loop and total_frames > 1
+        else 0
+    )
+    sim_frames = total_frames + wipe_frames
+
     frame_duration_ms = max(10, int(round(1000.0 / framerate)))
     step_advance = (
         steps_per_frame * speed
@@ -742,12 +1118,13 @@ def simulate_bz_reaction(
     for _ in range(warmup_steps):
         a, b, c = _step_bz(a, b, c, alpha, beta, gamma)
 
+    # Simulate N + K frames so frames [0..K-1] can be revealed behind the oxidation trigger pulse
+    # over the tail frames [N..N+K-1]
     a_prev = a
     curr_step = 0
-    canvas_indices: np.ndarray | None = None
-    frames: list[Image.Image] = []
-    for frame_idx in range(total_frames):
-        sim_time = frame_idx * step_advance
+    raw_fields: list[np.ndarray] = []
+    for sim_idx in range(sim_frames):
+        sim_time = sim_idx * step_advance
         target_step = int(np.ceil(sim_time))
         while curr_step < target_step:
             a_prev = a
@@ -755,11 +1132,44 @@ def simulate_bz_reaction(
             curr_step += 1
 
         if (optimize and snap_steps and step_advance <= 1.0) or curr_step == 0:
-            a_frame = a
+            a_frame = a.copy()
         else:
             frac = sim_time - (curr_step - 1)
-            a_frame = (1.0 - frac) * a_prev + frac * a
+            a_frame = ((1.0 - frac) * a_prev + frac * a).astype(np.float32)
+        raw_fields.append(a_frame)
 
+    if wipe_frames > 0:
+        arrival_map, max_arrival = _build_toroidal_arrival_map(
+            height,
+            width,
+            pulse_count=pulse_count,
+            noise_amp=pulse_noise_amp,
+            noise_freq=pulse_noise_freq,
+            rng=rng,
+        )
+        output_fields: list[np.ndarray] = []
+        for idx in range(total_frames):
+            if idx < wipe_frames:
+                wipe_progress = (idx + 0.5) / float(wipe_frames)
+                blended = _blend_pulse_wipe_field(
+                    a_tail=raw_fields[total_frames + idx],
+                    a_head=raw_fields[idx],
+                    arrival_map=arrival_map,
+                    max_arrival=max_arrival,
+                    wipe_progress=wipe_progress,
+                    pulse_speed=pulse_speed,
+                    pulse_sharpness=pulse_sharpness,
+                    pulse_decay=pulse_decay,
+                )
+                output_fields.append(blended)
+            else:
+                output_fields.append(raw_fields[idx])
+    else:
+        output_fields = raw_fields[:total_frames]
+
+    canvas_indices: np.ndarray | None = None
+    frames: list[Image.Image] = []
+    for frame_idx, a_frame in enumerate(output_fields):
         coarse_a = _downsample_field(a_frame, pixel_size)
         if optimize and scanline_smooth > 0:
             coarse_a = (1.0 - 2.0 * scanline_smooth) * coarse_a + scanline_smooth * (
@@ -777,6 +1187,7 @@ def simulate_bz_reaction(
                 diff_threshold,
                 bg_snap_threshold=bg_snap_threshold,
                 despeckle=despeckle,
+                tileable=tileable,
             )
         if optimize:
             canvas_indices = cell_indices
@@ -815,6 +1226,7 @@ def simulate_from_config(
         framerate=config.framerate,
         bg_color=config.bg_color,
         rings_color=config.rings_color,
+        palette_mode=config.palette_mode,
         speed=config.speed,
         alpha=config.alpha,
         beta=config.beta,
@@ -832,5 +1244,14 @@ def simulate_from_config(
         snap_steps=config.snap_steps,
         optimize=config.optimize,
         diff_threshold=config.diff_threshold,
+        seamless_loop=config.seamless_loop,
+        loop_wipe_ratio=config.loop_wipe_ratio,
+        pulse_count=config.pulse_count,
+        pulse_speed=config.pulse_speed,
+        pulse_sharpness=config.pulse_sharpness,
+        pulse_decay=config.pulse_decay,
+        pulse_noise_amp=config.pulse_noise_amp,
+        pulse_noise_freq=config.pulse_noise_freq,
+        tileable=config.tileable,
         progress_callback=progress_callback,
     )

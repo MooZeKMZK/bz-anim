@@ -73,6 +73,7 @@ class BZCanvas(Widget):
     def __init__(self, simulator: BZSimulator, **kwargs) -> None:
         super().__init__(**kwargs)
         self.simulator = simulator
+        self._active_field = None
         self._style_cache: dict[tuple, Style] = {}
         self._cached_strips: list[Strip] = []
         self._cached_key: tuple | None = None
@@ -112,7 +113,9 @@ class BZCanvas(Widget):
             left_seg = Segment(" " * pad_left, canvas_bg) if pad_left else None
             right_seg = Segment(" " * pad_right, canvas_bg) if pad_right else None
 
-            codepoints, fg_rgb = self.simulator.render_braille_data(char_w, char_h)
+            codepoints, fg_rgb = self.simulator.render_braille_data(
+                char_w, char_h, a_field=self._active_field
+            )
             cp_list = codepoints.tolist()
             fg_list = fg_rgb.tolist()
 
@@ -183,7 +186,7 @@ class BZCanvas(Widget):
             right_seg = Segment(" " * pad_right, canvas_bg) if pad_right else None
 
             rgb = self.simulator.render_rgb_array(
-                target_size=(pix_w, pix_h), tui_fast=True
+                a_field=self._active_field, target_size=(pix_w, pix_h), tui_fast=True
             )
             rgb_list = rgb.tolist()
             unit = "  " if mode == "soft" else "● "
@@ -256,7 +259,7 @@ class BZCanvas(Widget):
         right_seg = Segment(" " * pad_right, canvas_bg) if pad_right else None
 
         rgb = self.simulator.render_rgb_array(
-            target_size=(pix_w, pix_h), tui_fast=True
+            a_field=self._active_field, target_size=(pix_w, pix_h), tui_fast=True
         )
         rgb_list = rgb.tolist()
 
@@ -619,6 +622,7 @@ class BZTuiApp(App):
             framerate=cfg.framerate,
             bg_color=cfg.bg_color,
             rings_color=cfg.rings_color,
+            palette_mode=cfg.palette_mode,
             speed=cfg.speed,
             alpha=cfg.alpha,
             beta=cfg.beta,
@@ -636,6 +640,15 @@ class BZTuiApp(App):
             snap_steps=cfg.snap_steps,
             optimize=cfg.optimize,
             diff_threshold=cfg.diff_threshold,
+            seamless_loop=cfg.seamless_loop,
+            loop_wipe_ratio=cfg.loop_wipe_ratio,
+            pulse_count=cfg.pulse_count,
+            pulse_speed=cfg.pulse_speed,
+            pulse_sharpness=cfg.pulse_sharpness,
+            pulse_decay=cfg.pulse_decay,
+            pulse_noise_amp=cfg.pulse_noise_amp,
+            pulse_noise_freq=cfg.pulse_noise_freq,
+            tileable=cfg.tileable,
         )
 
     def compose(self) -> ComposeResult:
@@ -670,6 +683,11 @@ class BZTuiApp(App):
 
                 with Container(classes="brutal-card"):
                     yield Label(t.section_colors, classes="section-tag-yellow")
+                    yield Checkbox(
+                        "FERROIN 1D LUT MODE",
+                        value=(self.config.palette_mode == "ferroin"),
+                        id="cb-ferroin",
+                    )
                     with Horizontal(classes="field-row"):
                         yield Label("BG COLOR", classes="field-label")
                         yield Input(str(self.config.bg_color), id="in-bg-color", classes="field-input")
@@ -715,13 +733,30 @@ class BZTuiApp(App):
                         )
 
                 with Container(classes="brutal-card"):
+                    yield Label("04 // SEAMLESS LOOP & TORUS", classes="section-tag")
+                    yield Checkbox("SEAMLESS PULSE WIPE LOOP", value=self.config.seamless_loop, id="cb-seamless-loop")
+                    yield Checkbox("2D TORUS SPATIAL TILING", value=self.config.tileable, id="cb-tileable")
+                    with Horizontal(classes="field-row"):
+                        yield Label("WIPE RATIO", classes="field-label")
+                        yield Input(str(self.config.loop_wipe_ratio), id="in-wipe-ratio", classes="field-input")
+                    with Horizontal(classes="field-row"):
+                        yield Label("PULSES (N)", classes="field-label")
+                        yield Input(str(self.config.pulse_count), id="in-pulse-count", classes="field-input")
+                    with Horizontal(classes="field-row"):
+                        yield Label("PULSE SPD", classes="field-label")
+                        yield Input(str(self.config.pulse_speed), id="in-pulse-speed", classes="field-input")
+                    with Horizontal(classes="field-row"):
+                        yield Label("4D NOISE", classes="field-label")
+                        yield Input(str(self.config.pulse_noise_amp), id="in-pulse-noise", classes="field-input")
+
+                with Container(classes="brutal-card"):
                     yield Label(t.section_optimize, classes="section-tag-lime")
                     yield Checkbox("DELTA / LZW OPTIMIZE", value=self.config.optimize, id="cb-optimize")
                     yield Checkbox("DESPECKLE CELL DELTAS", value=self.config.despeckle, id="cb-despeckle")
                     yield Checkbox("SNAP DISCRETE STEPS", value=self.config.snap_steps, id="cb-snap-steps")
 
                 with Container(classes="brutal-card"):
-                    yield Label("05 // TOML CONFIG & THEME", classes="section-tag-blue")
+                    yield Label("06 // TOML CONFIG & THEME", classes="section-tag-blue")
                     with Horizontal(classes="field-row"):
                         yield Label("CONFIG TOML", classes="field-label")
                         yield Input(self.config_path, id="in-config-toml", classes="field-input")
@@ -761,9 +796,10 @@ class BZTuiApp(App):
     def _tick_simulation(self) -> None:
         if not self.is_playing:
             return
-        self.simulator.step_frame()
+        field = self.simulator.step_frame()
         canvas = self.query_one("#bz-canvas", BZCanvas)
-        canvas.step_count = self.simulator.curr_step
+        canvas._active_field = field
+        canvas.step_count = self.simulator.frame_idx
         canvas.refresh()
         status = self.query_one("#status-bar", Static)
         if not self._exporting:
@@ -783,6 +819,7 @@ class BZTuiApp(App):
         self.query_one("#in-size", Input).value = size_str
         self.query_one("#in-length", Input).value = str(cfg.length)
         self.query_one("#in-framerate", Input).value = str(cfg.framerate)
+        self.query_one("#cb-ferroin", Checkbox).value = cfg.palette_mode == "ferroin"
         self.query_one("#in-bg-color", Input).value = str(cfg.bg_color)
         self.query_one("#in-rings-color", Input).value = str(cfg.rings_color)
         self.query_one("#in-colors", Input).value = str(cfg.colors)
@@ -795,6 +832,12 @@ class BZTuiApp(App):
         self.query_one("#in-gamma", Input).value = str(cfg.gamma)
         self.query_one("#in-warmup", Input).value = str(cfg.warmup_steps)
         self.query_one("#in-seed", Input).value = "" if cfg.seed is None else str(cfg.seed)
+        self.query_one("#cb-seamless-loop", Checkbox).value = bool(cfg.seamless_loop)
+        self.query_one("#cb-tileable", Checkbox).value = bool(cfg.tileable)
+        self.query_one("#in-wipe-ratio", Input).value = str(cfg.loop_wipe_ratio)
+        self.query_one("#in-pulse-count", Input).value = str(cfg.pulse_count)
+        self.query_one("#in-pulse-speed", Input).value = str(cfg.pulse_speed)
+        self.query_one("#in-pulse-noise", Input).value = str(cfg.pulse_noise_amp)
         self.query_one("#cb-optimize", Checkbox).value = bool(cfg.optimize)
         self.query_one("#cb-despeckle", Checkbox).value = bool(cfg.despeckle)
         self.query_one("#cb-snap-steps", Checkbox).value = bool(cfg.snap_steps)
@@ -811,6 +854,7 @@ class BZTuiApp(App):
             size=self.query_one("#in-size", Input).value.strip() or "320x320",
             length=float(self.query_one("#in-length", Input).value),
             framerate=int(self.query_one("#in-framerate", Input).value),
+            palette_mode="ferroin" if self.query_one("#cb-ferroin", Checkbox).value else "gradient",
             bg_color=self.query_one("#in-bg-color", Input).value.strip(),
             rings_color=self.query_one("#in-rings-color", Input).value.strip(),
             colors=int(self.query_one("#in-colors", Input).value),
@@ -823,6 +867,12 @@ class BZTuiApp(App):
             gamma=float(self.query_one("#in-gamma", Input).value),
             warmup_steps=int(self.query_one("#in-warmup", Input).value),
             seed=seed_val,
+            seamless_loop=self.query_one("#cb-seamless-loop", Checkbox).value,
+            tileable=self.query_one("#cb-tileable", Checkbox).value,
+            loop_wipe_ratio=float(self.query_one("#in-wipe-ratio", Input).value),
+            pulse_count=int(self.query_one("#in-pulse-count", Input).value),
+            pulse_speed=float(self.query_one("#in-pulse-speed", Input).value),
+            pulse_noise_amp=float(self.query_one("#in-pulse-noise", Input).value),
             optimize=self.query_one("#cb-optimize", Checkbox).value,
             despeckle=self.query_one("#cb-despeckle", Checkbox).value,
             snap_steps=self.query_one("#cb-snap-steps", Checkbox).value,
@@ -857,7 +907,8 @@ class BZTuiApp(App):
         interval = 1.0 / max(1, min(30, self.config.framerate))
         self._timer = self.set_interval(interval, self._tick_simulation)
         canvas = self.query_one("#bz-canvas", BZCanvas)
-        canvas.step_count = self.simulator.curr_step
+        canvas._active_field = self.simulator.current_field()
+        canvas.step_count = self.simulator.frame_idx
         canvas.refresh()
         status.update(f"RESET // {self.simulator.width}x{self.simulator.height} GRID INITIALIZED")
 
@@ -952,9 +1003,10 @@ class BZTuiApp(App):
     def _on_step_pressed(self) -> None:
         if self.is_playing:
             self.action_toggle_play()
-        self.simulator.step_frame()
+        field = self.simulator.step_frame()
         canvas = self.query_one("#bz-canvas", BZCanvas)
-        canvas.step_count = self.simulator.curr_step
+        canvas._active_field = field
+        canvas.step_count = self.simulator.frame_idx
         canvas.refresh()
 
     @on(Button.Pressed, "#btn-view")

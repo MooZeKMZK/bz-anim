@@ -420,6 +420,11 @@ class BZGuiWindow(QMainWindow):
         card_colors, form_colors = self._make_brutal_card(
             t.section_colors, "colors", t.acid_yellow, t.ink
         )
+        self.cb_ferroin = QCheckBox("FERROIN 1D LUT MODE")
+        self.cb_ferroin.setChecked(self.config.palette_mode == "ferroin")
+        self.cb_ferroin.stateChanged.connect(self._on_live_visual_changed)
+        form_colors.addRow(self.cb_ferroin)
+
         bg_row = QHBoxLayout()
         self.ed_bg_color = QLineEdit(str(self.config.bg_color))
         self.ed_bg_color.editingFinished.connect(self._on_live_visual_changed)
@@ -515,7 +520,50 @@ class BZGuiWindow(QMainWindow):
         form_kinetics.addRow(self._lbl("RNG SEED"), self.sp_seed)
         sidebar_layout.addWidget(card_kinetics)
 
-        # 4. GIF Compression Card
+        # 4. Seamless Loop & Torus Tileability Card
+        card_loop, form_loop = self._make_brutal_card(
+            "04 // SEAMLESS LOOP & TORUS", "loop", t.acid_cyan, t.ink
+        )
+        self.cb_seamless_loop = QCheckBox("SEAMLESS PULSE WIPE LOOP")
+        self.cb_seamless_loop.setChecked(bool(self.config.seamless_loop))
+        self.cb_seamless_loop.stateChanged.connect(self._on_live_param_changed)
+        form_loop.addRow(self.cb_seamless_loop)
+
+        self.cb_tileable = QCheckBox("2D TORUS SPATIAL TILING")
+        self.cb_tileable.setChecked(bool(self.config.tileable))
+        self.cb_tileable.stateChanged.connect(self._on_live_param_changed)
+        form_loop.addRow(self.cb_tileable)
+
+        self.sp_wipe_ratio = QDoubleSpinBox()
+        self.sp_wipe_ratio.setRange(0.05, 0.95)
+        self.sp_wipe_ratio.setSingleStep(0.02)
+        self.sp_wipe_ratio.setDecimals(2)
+        self.sp_wipe_ratio.setValue(float(self.config.loop_wipe_ratio))
+        self.sp_wipe_ratio.valueChanged.connect(self._on_live_param_changed)
+        form_loop.addRow(self._lbl("WIPE RATIO"), self.sp_wipe_ratio)
+
+        self.sp_pulse_count = QSpinBox()
+        self.sp_pulse_count.setRange(1, 16)
+        self.sp_pulse_count.setValue(int(self.config.pulse_count))
+        form_loop.addRow(self._lbl("PULSES (N)"), self.sp_pulse_count)
+
+        self.sp_pulse_speed = QDoubleSpinBox()
+        self.sp_pulse_speed.setRange(0.5, 10.0)
+        self.sp_pulse_speed.setSingleStep(0.1)
+        self.sp_pulse_speed.setDecimals(2)
+        self.sp_pulse_speed.setValue(float(self.config.pulse_speed))
+        self.sp_pulse_speed.valueChanged.connect(self._on_live_param_changed)
+        form_loop.addRow(self._lbl("PULSE SPD"), self.sp_pulse_speed)
+
+        self.sp_pulse_noise = QDoubleSpinBox()
+        self.sp_pulse_noise.setRange(0.0, 0.5)
+        self.sp_pulse_noise.setSingleStep(0.01)
+        self.sp_pulse_noise.setDecimals(2)
+        self.sp_pulse_noise.setValue(float(self.config.pulse_noise_amp))
+        form_loop.addRow(self._lbl("4D NOISE"), self.sp_pulse_noise)
+        sidebar_layout.addWidget(card_loop)
+
+        # 5. GIF Compression Card
         card_opt, form_opt = self._make_brutal_card(
             t.section_optimize, "optimize", t.acid_lime, t.ink
         )
@@ -551,9 +599,9 @@ class BZGuiWindow(QMainWindow):
         form_opt.addRow(self._lbl("BG SNAP"), self.sp_bg_snap)
         sidebar_layout.addWidget(card_opt)
 
-        # 5. TOML Config & Theme Card
+        # 6. TOML Config & Theme Card
         card_toml, form_toml = self._make_brutal_card(
-            "05 // TOML CONFIG & THEME", "toml", t.electric_blue, t.ink
+            "06 // TOML CONFIG & THEME", "toml", t.electric_blue, t.ink
         )
         cfg_btn_row = QHBoxLayout()
         btn_load_cfg = QPushButton("LOAD CONFIG...")
@@ -675,8 +723,9 @@ class BZGuiWindow(QMainWindow):
             "canvas": (t.section_canvas, t.acid_cyan),
             "colors": (t.section_colors, t.acid_yellow),
             "kinetics": (t.section_kinetics, t.hot_magenta),
+            "loop": ("04 // SEAMLESS LOOP & TORUS", t.acid_cyan),
             "optimize": (t.section_optimize, t.acid_lime),
-            "toml": ("05 // TOML CONFIG & THEME", t.electric_blue),
+            "toml": ("06 // TOML CONFIG & THEME", t.electric_blue),
         }
         for lbl_widget, role in self._section_tags:
             if role in role_map:
@@ -695,6 +744,7 @@ class BZGuiWindow(QMainWindow):
         self.sp_height.setValue(h)
         self.sp_length.setValue(float(cfg.length))
         self.sp_framerate.setValue(int(cfg.framerate))
+        self.cb_ferroin.setChecked(cfg.palette_mode == "ferroin")
         self.ed_bg_color.setText(str(cfg.bg_color))
         self.ed_rings_color.setText(str(cfg.rings_color))
         self.sp_colors.setValue(int(cfg.colors))
@@ -707,6 +757,12 @@ class BZGuiWindow(QMainWindow):
         self.sp_gamma.setValue(float(cfg.gamma))
         self.sp_warmup.setValue(int(cfg.warmup_steps))
         self.sp_seed.setValue(-1 if cfg.seed is None else int(cfg.seed))
+        self.cb_seamless_loop.setChecked(bool(cfg.seamless_loop))
+        self.cb_tileable.setChecked(bool(cfg.tileable))
+        self.sp_wipe_ratio.setValue(float(cfg.loop_wipe_ratio))
+        self.sp_pulse_count.setValue(int(cfg.pulse_count))
+        self.sp_pulse_speed.setValue(float(cfg.pulse_speed))
+        self.sp_pulse_noise.setValue(float(cfg.pulse_noise_amp))
         self.cb_optimize.setChecked(bool(cfg.optimize))
         self.cb_despeckle.setChecked(bool(cfg.despeckle))
         self.cb_snap_steps.setChecked(bool(cfg.snap_steps))
@@ -810,6 +866,7 @@ class BZGuiWindow(QMainWindow):
             size=(self.sp_width.value(), self.sp_height.value()),
             length=self.sp_length.value(),
             framerate=self.sp_framerate.value(),
+            palette_mode="ferroin" if self.cb_ferroin.isChecked() else "gradient",
             bg_color=self.ed_bg_color.text().strip(),
             rings_color=self.ed_rings_color.text().strip(),
             speed=self.sp_speed.value(),
@@ -822,6 +879,12 @@ class BZGuiWindow(QMainWindow):
             pixel_size=self.sp_pixel_size.value(),
             palette_gamma=self.sp_palette_gamma.value(),
             contrast_gamma=self.sp_contrast_gamma.value(),
+            seamless_loop=self.cb_seamless_loop.isChecked(),
+            tileable=self.cb_tileable.isChecked(),
+            loop_wipe_ratio=self.sp_wipe_ratio.value(),
+            pulse_count=self.sp_pulse_count.value(),
+            pulse_speed=self.sp_pulse_speed.value(),
+            pulse_noise_amp=self.sp_pulse_noise.value(),
             scanline_smooth=self.sp_scanline.value(),
             bg_snap_threshold=self.sp_bg_snap.value(),
             despeckle=self.cb_despeckle.isChecked(),
@@ -843,6 +906,10 @@ class BZGuiWindow(QMainWindow):
             self.simulator.config.beta = self.sp_beta.value()
             self.simulator.config.gamma = self.sp_gamma.value()
             self.simulator.config.framerate = self.sp_framerate.value()
+            self.simulator.config.seamless_loop = self.cb_seamless_loop.isChecked()
+            self.simulator.config.tileable = self.cb_tileable.isChecked()
+            self.simulator.config.loop_wipe_ratio = self.sp_wipe_ratio.value()
+            self.simulator.config.pulse_speed = self.sp_pulse_speed.value()
             self._update_timer_interval()
         except Exception:
             pass
@@ -851,6 +918,9 @@ class BZGuiWindow(QMainWindow):
         try:
             parse_color(self.ed_bg_color.text().strip())
             parse_color(self.ed_rings_color.text().strip())
+            self.simulator.config.palette_mode = (
+                "ferroin" if self.cb_ferroin.isChecked() else "gradient"
+            )
             self.simulator.config.bg_color = self.ed_bg_color.text().strip()
             self.simulator.config.rings_color = self.ed_rings_color.text().strip()
             self.simulator.config.colors = self.sp_colors.value()

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=BZ-Anim Reaction Lab
+GenericName=Belousov-Zhabotinsky Reaction Simulator
+Comment=Interactive 2D Belousov-Zhabotinsky reaction-diffusion simulator and GIF exporter
+Exec=bz-gui
+Icon=bz-anim
+Terminal=false
+Categories=Science;Chemistry;Graphics;Simulation;
+Keywords=Belousov;Zhabotinsky;Reaction;Diffusion;Simulation;GIF;
+StartupNotify=true

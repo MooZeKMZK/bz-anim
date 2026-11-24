@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bz-anim-cli"
+version = "0.1.0"
+description = "Command-line interface (CLI) for the 2D Belousov-Zhabotinsky reaction-diffusion simulator"
+requires-python = ">=3.10"
+dependencies = [
+    "bz-anim-core>=0.1.0",
+]
+
+[project.scripts]
+bz-cli = "bz_anim_cli.cli:run_cli"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["bz_anim_cli"]

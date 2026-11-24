@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bz-anim-tui"
+version = "0.1.0"
+description = "Neo-Brutalist Textual TUI for the 2D Belousov-Zhabotinsky reaction-diffusion simulator"
+requires-python = ">=3.10"
+dependencies = [
+    "bz-anim-core>=0.1.0",
+    "bz-anim-cli>=0.1.0",
+    "textual>=0.80.0",
+]
+
+[project.scripts]
+bz-tui = "bz_anim_tui.tui:run_tui"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["bz_anim_tui"]

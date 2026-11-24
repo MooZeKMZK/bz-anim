@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bz-anim-core"
+version = "0.1.0"
+description = "Core 2D Belousov-Zhabotinsky reaction-diffusion simulation engine, TOML config, and Neo-Brutalist theme system"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0.0",
+    "pillow>=10.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["bz_anim_core", "bz_anim_core.defaults"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"bz_anim_core.defaults" = ["*.toml"]

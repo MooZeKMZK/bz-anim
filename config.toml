@@ -5,8 +5,10 @@ output_path = "bz_reaction.gif"
 size = "320x320"
 length = 5.0
 framerate = 20
+tileable = true
 
 [palette]
+palette_mode = "gradient"  # "gradient" or "ferroin"
 bg_color = "#0b132b"
 rings_color = "#00f5d4"
 colors = 10
@@ -22,6 +24,16 @@ gamma = 1.0
 warmup_steps = 65
 seed = 42  # Use -1 for random seed
 # steps_per_frame = 2.0  # Optional override (uncomment to set explicit steps/frame)
+
+[loop]
+seamless_loop = true
+loop_wipe_ratio = 0.28
+pulse_count = 3
+pulse_speed = 1.45
+pulse_sharpness = 18.0
+pulse_decay = 4.0
+pulse_noise_amp = 0.08
+pulse_noise_freq = 3
 
 [compression]
 optimize = true
