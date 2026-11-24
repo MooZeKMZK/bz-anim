@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -197,6 +197,16 @@ QProgressBar {{
 QProgressBar::chunk {{
     background-color: {t.hot_magenta};
 }}
+
+QToolTip {{
+    background-color: {t.ink};
+    color: {t.acid_yellow};
+    border: 2px solid {t.acid_cyan};
+    padding: 6px 8px;
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", "Monospace";
+    font-size: 11px;
+    font-weight: 700;
+}}
 """
 
 
@@ -293,6 +303,7 @@ class BZGuiWindow(QMainWindow):
         self.is_playing = True
         self._worker: GifExportWorker | None = None
         self._section_tags: list[tuple[QLabel, str]] = []
+        self._active_tip: str | None = None
 
         t = theme_mod.ACTIVE_THEME
         self.setWindowTitle(f"{t.app_title} — {t.app_subtitle}")
@@ -335,11 +346,48 @@ class BZGuiWindow(QMainWindow):
         outer.addWidget(form_holder)
         return card, form
 
-    @staticmethod
-    def _lbl(text: str) -> QLabel:
+    def _lbl(self, text: str, tip_key: str = "") -> QLabel:
         label = QLabel(text)
         label.setProperty("class", "field-label")
+        if tip_key:
+            self._set_tip(tip_key, label)
         return label
+
+    def _set_tip(self, tip_key: str, *widgets: QWidget) -> None:
+        """Assign a shared hover tooltip description from `OPTION_TOOLTIPS` to one or more Qt widgets."""
+        tip = theme_mod.OPTION_TOOLTIPS.get(tip_key, "")
+        if tip:
+            for w in widgets:
+                w.setToolTip(tip)
+                w.setStatusTip(tip)
+                w.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+                w.installEventFilter(self)
+
+    def _refresh_status_label(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
+        if self._active_tip:
+            self.lbl_status.setText(f"INFO // {self._active_tip}")
+        else:
+            state = "LIVE" if self.is_playing else "PAUSED"
+            self.lbl_status.setText(
+                f"{state} // GRID {self.simulator.width}×{self.simulator.height} // "
+                f"STEP #{self.simulator.curr_step:04d} // SPEED {self.simulator.config.speed:.2f}X"
+            )
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if isinstance(watched, QWidget):
+            et = event.type()
+            if et in (QEvent.Type.Enter, QEvent.Type.HoverEnter, QEvent.Type.FocusIn):
+                tip = watched.toolTip()
+                if tip and tip != self._active_tip:
+                    self._active_tip = tip
+                    self._refresh_status_label()
+            elif et in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                if self._active_tip == watched.toolTip():
+                    self._active_tip = None
+                    self._refresh_status_label()
+        return super().eventFilter(watched, event)
 
     def _build_ui(self) -> None:
         t = theme_mod.ACTIVE_THEME
@@ -385,9 +433,10 @@ class BZGuiWindow(QMainWindow):
         self.ed_output = QLineEdit(str(self.config.output_path))
         btn_browse = QPushButton("FILE...")
         btn_browse.clicked.connect(self._browse_output)
+        self._set_tip("output_path", self.ed_output, btn_browse)
         out_row.addWidget(self.ed_output)
         out_row.addWidget(btn_browse)
-        form_canvas.addRow(self._lbl("OUTPUT GIF"), out_row)
+        form_canvas.addRow(self._lbl("OUTPUT GIF", "output_path"), out_row)
 
         w, h = parse_size(self.config.size)
         size_row = QHBoxLayout()
@@ -397,23 +446,26 @@ class BZGuiWindow(QMainWindow):
         self.sp_height = QSpinBox()
         self.sp_height.setRange(16, 4096)
         self.sp_height.setValue(h)
+        self._set_tip("size", self.sp_width, self.sp_height)
         size_row.addWidget(self.sp_width)
-        size_row.addWidget(self._lbl("×"))
+        size_row.addWidget(self._lbl("×", "size"))
         size_row.addWidget(self.sp_height)
-        form_canvas.addRow(self._lbl("SIZE (W×H)"), size_row)
+        form_canvas.addRow(self._lbl("SIZE (W×H)", "size"), size_row)
 
         self.sp_length = QDoubleSpinBox()
         self.sp_length.setRange(0.1, 300.0)
         self.sp_length.setSingleStep(0.5)
         self.sp_length.setDecimals(2)
         self.sp_length.setValue(float(self.config.length))
-        form_canvas.addRow(self._lbl("LENGTH (S)"), self.sp_length)
+        self._set_tip("length", self.sp_length)
+        form_canvas.addRow(self._lbl("LENGTH (S)", "length"), self.sp_length)
 
         self.sp_framerate = QSpinBox()
         self.sp_framerate.setRange(1, 120)
         self.sp_framerate.setValue(int(self.config.framerate))
         self.sp_framerate.valueChanged.connect(self._on_live_param_changed)
-        form_canvas.addRow(self._lbl("FRAMERATE"), self.sp_framerate)
+        self._set_tip("framerate", self.sp_framerate)
+        form_canvas.addRow(self._lbl("FRAMERATE", "framerate"), self.sp_framerate)
         sidebar_layout.addWidget(card_canvas)
 
         # 2. Colors & Palette Card
@@ -423,6 +475,7 @@ class BZGuiWindow(QMainWindow):
         self.cb_ferroin = QCheckBox("FERROIN 1D LUT MODE")
         self.cb_ferroin.setChecked(self.config.palette_mode == "ferroin")
         self.cb_ferroin.stateChanged.connect(self._on_live_visual_changed)
+        self._set_tip("palette_mode", self.cb_ferroin)
         form_colors.addRow(self.cb_ferroin)
 
         bg_row = QHBoxLayout()
@@ -430,30 +483,34 @@ class BZGuiWindow(QMainWindow):
         self.ed_bg_color.editingFinished.connect(self._on_live_visual_changed)
         self.btn_bg_pick = QPushButton("PICK")
         self.btn_bg_pick.clicked.connect(lambda: self._pick_color(self.ed_bg_color))
+        self._set_tip("bg_color", self.ed_bg_color, self.btn_bg_pick)
         bg_row.addWidget(self.ed_bg_color)
         bg_row.addWidget(self.btn_bg_pick)
-        form_colors.addRow(self._lbl("BG COLOR"), bg_row)
+        form_colors.addRow(self._lbl("BG COLOR", "bg_color"), bg_row)
 
         rings_row = QHBoxLayout()
         self.ed_rings_color = QLineEdit(str(self.config.rings_color))
         self.ed_rings_color.editingFinished.connect(self._on_live_visual_changed)
         self.btn_rings_pick = QPushButton("PICK")
         self.btn_rings_pick.clicked.connect(lambda: self._pick_color(self.ed_rings_color))
+        self._set_tip("rings_color", self.ed_rings_color, self.btn_rings_pick)
         rings_row.addWidget(self.ed_rings_color)
         rings_row.addWidget(self.btn_rings_pick)
-        form_colors.addRow(self._lbl("RINGS COLOR"), rings_row)
+        form_colors.addRow(self._lbl("RINGS COLOR", "rings_color"), rings_row)
 
         self.sp_colors = QSpinBox()
         self.sp_colors.setRange(2, 256)
         self.sp_colors.setValue(int(self.config.colors))
         self.sp_colors.valueChanged.connect(self._on_live_visual_changed)
-        form_colors.addRow(self._lbl("SHADES"), self.sp_colors)
+        self._set_tip("colors", self.sp_colors)
+        form_colors.addRow(self._lbl("SHADES", "colors"), self.sp_colors)
 
         self.sp_pixel_size = QSpinBox()
         self.sp_pixel_size.setRange(1, 64)
         self.sp_pixel_size.setValue(int(self.config.pixel_size))
         self.sp_pixel_size.valueChanged.connect(self._on_live_visual_changed)
-        form_colors.addRow(self._lbl("PIXEL SIZE"), self.sp_pixel_size)
+        self._set_tip("pixel_size", self.sp_pixel_size)
+        form_colors.addRow(self._lbl("PIXEL SIZE", "pixel_size"), self.sp_pixel_size)
 
         self.sp_palette_gamma = QDoubleSpinBox()
         self.sp_palette_gamma.setRange(0.1, 5.0)
@@ -461,7 +518,8 @@ class BZGuiWindow(QMainWindow):
         self.sp_palette_gamma.setDecimals(2)
         self.sp_palette_gamma.setValue(float(self.config.palette_gamma))
         self.sp_palette_gamma.valueChanged.connect(self._on_live_visual_changed)
-        form_colors.addRow(self._lbl("PAL GAMMA"), self.sp_palette_gamma)
+        self._set_tip("palette_gamma", self.sp_palette_gamma)
+        form_colors.addRow(self._lbl("PAL GAMMA", "palette_gamma"), self.sp_palette_gamma)
 
         self.sp_contrast_gamma = QDoubleSpinBox()
         self.sp_contrast_gamma.setRange(0.1, 5.0)
@@ -469,7 +527,8 @@ class BZGuiWindow(QMainWindow):
         self.sp_contrast_gamma.setDecimals(2)
         self.sp_contrast_gamma.setValue(float(self.config.contrast_gamma))
         self.sp_contrast_gamma.valueChanged.connect(self._on_live_visual_changed)
-        form_colors.addRow(self._lbl("CNT GAMMA"), self.sp_contrast_gamma)
+        self._set_tip("contrast_gamma", self.sp_contrast_gamma)
+        form_colors.addRow(self._lbl("CNT GAMMA", "contrast_gamma"), self.sp_contrast_gamma)
         sidebar_layout.addWidget(card_colors)
 
         # 3. Reaction Kinetics Card
@@ -482,7 +541,8 @@ class BZGuiWindow(QMainWindow):
         self.sp_speed.setDecimals(2)
         self.sp_speed.setValue(float(self.config.speed))
         self.sp_speed.valueChanged.connect(self._on_live_param_changed)
-        form_kinetics.addRow(self._lbl("SPEED (X)"), self.sp_speed)
+        self._set_tip("speed", self.sp_speed)
+        form_kinetics.addRow(self._lbl("SPEED (X)", "speed"), self.sp_speed)
 
         self.sp_alpha = QDoubleSpinBox()
         self.sp_alpha.setRange(0.0, 5.0)
@@ -490,7 +550,8 @@ class BZGuiWindow(QMainWindow):
         self.sp_alpha.setDecimals(2)
         self.sp_alpha.setValue(float(self.config.alpha))
         self.sp_alpha.valueChanged.connect(self._on_live_param_changed)
-        form_kinetics.addRow(self._lbl("ALPHA A+B"), self.sp_alpha)
+        self._set_tip("alpha", self.sp_alpha)
+        form_kinetics.addRow(self._lbl("ALPHA A+B", "alpha"), self.sp_alpha)
 
         self.sp_beta = QDoubleSpinBox()
         self.sp_beta.setRange(0.0, 5.0)
@@ -498,7 +559,8 @@ class BZGuiWindow(QMainWindow):
         self.sp_beta.setDecimals(2)
         self.sp_beta.setValue(float(self.config.beta))
         self.sp_beta.valueChanged.connect(self._on_live_param_changed)
-        form_kinetics.addRow(self._lbl("BETA B+C"), self.sp_beta)
+        self._set_tip("beta", self.sp_beta)
+        form_kinetics.addRow(self._lbl("BETA B+C", "beta"), self.sp_beta)
 
         self.sp_gamma = QDoubleSpinBox()
         self.sp_gamma.setRange(0.0, 5.0)
@@ -506,18 +568,21 @@ class BZGuiWindow(QMainWindow):
         self.sp_gamma.setDecimals(2)
         self.sp_gamma.setValue(float(self.config.gamma))
         self.sp_gamma.valueChanged.connect(self._on_live_param_changed)
-        form_kinetics.addRow(self._lbl("GAMMA C+A"), self.sp_gamma)
+        self._set_tip("gamma", self.sp_gamma)
+        form_kinetics.addRow(self._lbl("GAMMA C+A", "gamma"), self.sp_gamma)
 
         self.sp_warmup = QSpinBox()
         self.sp_warmup.setRange(0, 2000)
         self.sp_warmup.setValue(int(self.config.warmup_steps))
-        form_kinetics.addRow(self._lbl("WARMUP"), self.sp_warmup)
+        self._set_tip("warmup_steps", self.sp_warmup)
+        form_kinetics.addRow(self._lbl("WARMUP", "warmup_steps"), self.sp_warmup)
 
         self.sp_seed = QSpinBox()
         self.sp_seed.setRange(-1, 999999999)
         self.sp_seed.setSpecialValueText("RANDOM (-1)")
         self.sp_seed.setValue(-1 if self.config.seed is None else int(self.config.seed))
-        form_kinetics.addRow(self._lbl("RNG SEED"), self.sp_seed)
+        self._set_tip("seed", self.sp_seed)
+        form_kinetics.addRow(self._lbl("RNG SEED", "seed"), self.sp_seed)
         sidebar_layout.addWidget(card_kinetics)
 
         # 4. Seamless Loop & Torus Tileability Card
@@ -527,11 +592,13 @@ class BZGuiWindow(QMainWindow):
         self.cb_seamless_loop = QCheckBox("SEAMLESS PULSE WIPE LOOP")
         self.cb_seamless_loop.setChecked(bool(self.config.seamless_loop))
         self.cb_seamless_loop.stateChanged.connect(self._on_live_param_changed)
+        self._set_tip("seamless_loop", self.cb_seamless_loop)
         form_loop.addRow(self.cb_seamless_loop)
 
         self.cb_tileable = QCheckBox("2D TORUS SPATIAL TILING")
         self.cb_tileable.setChecked(bool(self.config.tileable))
         self.cb_tileable.stateChanged.connect(self._on_live_param_changed)
+        self._set_tip("tileable", self.cb_tileable)
         form_loop.addRow(self.cb_tileable)
 
         self.sp_wipe_ratio = QDoubleSpinBox()
@@ -540,12 +607,14 @@ class BZGuiWindow(QMainWindow):
         self.sp_wipe_ratio.setDecimals(2)
         self.sp_wipe_ratio.setValue(float(self.config.loop_wipe_ratio))
         self.sp_wipe_ratio.valueChanged.connect(self._on_live_param_changed)
-        form_loop.addRow(self._lbl("WIPE RATIO"), self.sp_wipe_ratio)
+        self._set_tip("loop_wipe_ratio", self.sp_wipe_ratio)
+        form_loop.addRow(self._lbl("WIPE RATIO", "loop_wipe_ratio"), self.sp_wipe_ratio)
 
         self.sp_pulse_count = QSpinBox()
         self.sp_pulse_count.setRange(1, 16)
         self.sp_pulse_count.setValue(int(self.config.pulse_count))
-        form_loop.addRow(self._lbl("PULSES (N)"), self.sp_pulse_count)
+        self._set_tip("pulse_count", self.sp_pulse_count)
+        form_loop.addRow(self._lbl("PULSES (N)", "pulse_count"), self.sp_pulse_count)
 
         self.sp_pulse_speed = QDoubleSpinBox()
         self.sp_pulse_speed.setRange(0.5, 10.0)
@@ -553,14 +622,16 @@ class BZGuiWindow(QMainWindow):
         self.sp_pulse_speed.setDecimals(2)
         self.sp_pulse_speed.setValue(float(self.config.pulse_speed))
         self.sp_pulse_speed.valueChanged.connect(self._on_live_param_changed)
-        form_loop.addRow(self._lbl("PULSE SPD"), self.sp_pulse_speed)
+        self._set_tip("pulse_speed", self.sp_pulse_speed)
+        form_loop.addRow(self._lbl("PULSE SPD", "pulse_speed"), self.sp_pulse_speed)
 
         self.sp_pulse_noise = QDoubleSpinBox()
         self.sp_pulse_noise.setRange(0.0, 0.5)
         self.sp_pulse_noise.setSingleStep(0.01)
         self.sp_pulse_noise.setDecimals(2)
         self.sp_pulse_noise.setValue(float(self.config.pulse_noise_amp))
-        form_loop.addRow(self._lbl("4D NOISE"), self.sp_pulse_noise)
+        self._set_tip("pulse_noise_amp", self.sp_pulse_noise)
+        form_loop.addRow(self._lbl("4D NOISE", "pulse_noise_amp"), self.sp_pulse_noise)
         sidebar_layout.addWidget(card_loop)
 
         # 5. GIF Compression Card
@@ -569,14 +640,17 @@ class BZGuiWindow(QMainWindow):
         )
         self.cb_optimize = QCheckBox("DELTA / LZW OPTIMIZE")
         self.cb_optimize.setChecked(bool(self.config.optimize))
+        self._set_tip("optimize", self.cb_optimize)
         form_opt.addRow(self.cb_optimize)
 
         self.cb_despeckle = QCheckBox("DESPECKLE CELL DELTAS")
         self.cb_despeckle.setChecked(bool(self.config.despeckle))
+        self._set_tip("despeckle", self.cb_despeckle)
         form_opt.addRow(self.cb_despeckle)
 
         self.cb_snap_steps = QCheckBox("SNAP DISCRETE STEPS")
         self.cb_snap_steps.setChecked(bool(self.config.snap_steps))
+        self._set_tip("snap_steps", self.cb_snap_steps)
         form_opt.addRow(self.cb_snap_steps)
 
         self.sp_scanline = QDoubleSpinBox()
@@ -584,19 +658,22 @@ class BZGuiWindow(QMainWindow):
         self.sp_scanline.setSingleStep(0.05)
         self.sp_scanline.setDecimals(2)
         self.sp_scanline.setValue(float(self.config.scanline_smooth))
-        form_opt.addRow(self._lbl("SCANLINE"), self.sp_scanline)
+        self._set_tip("scanline_smooth", self.sp_scanline)
+        form_opt.addRow(self._lbl("SCANLINE", "scanline_smooth"), self.sp_scanline)
 
         self.sp_diff_thresh = QSpinBox()
         self.sp_diff_thresh.setRange(0, 32)
         self.sp_diff_thresh.setValue(int(self.config.diff_threshold))
-        form_opt.addRow(self._lbl("DIFF THRESH"), self.sp_diff_thresh)
+        self._set_tip("diff_threshold", self.sp_diff_thresh)
+        form_opt.addRow(self._lbl("DIFF THRESH", "diff_threshold"), self.sp_diff_thresh)
 
         self.sp_bg_snap = QDoubleSpinBox()
         self.sp_bg_snap.setRange(0.0, 2.0)
         self.sp_bg_snap.setSingleStep(0.05)
         self.sp_bg_snap.setDecimals(2)
         self.sp_bg_snap.setValue(float(self.config.bg_snap_threshold))
-        form_opt.addRow(self._lbl("BG SNAP"), self.sp_bg_snap)
+        self._set_tip("bg_snap_threshold", self.sp_bg_snap)
+        form_opt.addRow(self._lbl("BG SNAP", "bg_snap_threshold"), self.sp_bg_snap)
         sidebar_layout.addWidget(card_opt)
 
         # 6. TOML Config & Theme Card
@@ -608,18 +685,20 @@ class BZGuiWindow(QMainWindow):
         btn_load_cfg.clicked.connect(self._load_config_dialog)
         btn_save_cfg = QPushButton("SAVE CONFIG...")
         btn_save_cfg.clicked.connect(self._save_config_dialog)
+        self._set_tip("config_toml", btn_load_cfg, btn_save_cfg)
         cfg_btn_row.addWidget(btn_load_cfg)
         cfg_btn_row.addWidget(btn_save_cfg)
-        form_toml.addRow(self._lbl("OPTIONS"), cfg_btn_row)
+        form_toml.addRow(self._lbl("OPTIONS", "config_toml"), cfg_btn_row)
 
         theme_btn_row = QHBoxLayout()
         btn_load_theme = QPushButton("LOAD THEME...")
         btn_load_theme.clicked.connect(self._load_theme_dialog)
         btn_save_theme = QPushButton("SAVE THEME...")
         btn_save_theme.clicked.connect(self._save_theme_dialog)
+        self._set_tip("theme_toml", btn_load_theme, btn_save_theme)
         theme_btn_row.addWidget(btn_load_theme)
         theme_btn_row.addWidget(btn_save_theme)
-        form_toml.addRow(self._lbl("UI THEME"), theme_btn_row)
+        form_toml.addRow(self._lbl("UI THEME", "theme_toml"), theme_btn_row)
         sidebar_layout.addWidget(card_toml)
 
         sidebar_layout.addStretch()
@@ -650,20 +729,24 @@ class BZGuiWindow(QMainWindow):
         self.btn_play.setObjectName("btn-play")
         _apply_brutal_shadow(self.btn_play, t.paper, offset=4)
         self.btn_play.clicked.connect(self._toggle_play)
+        self._set_tip("btn_play", self.btn_play)
 
         self.btn_step = QPushButton("⏭ STEP FRAME")
         _apply_brutal_shadow(self.btn_step, t.paper, offset=4)
         self.btn_step.clicked.connect(self._step_once)
+        self._set_tip("btn_step", self.btn_step)
 
         self.btn_reset = QPushButton("↺ APPLY & RESET")
         self.btn_reset.setObjectName("btn-reset")
         _apply_brutal_shadow(self.btn_reset, t.paper, offset=4)
         self.btn_reset.clicked.connect(self._reset_simulation)
+        self._set_tip("btn_reset", self.btn_reset)
 
         self.btn_export = QPushButton("⬇ EXPORT ANIMATED GIF")
         self.btn_export.setObjectName("btn-export")
         _apply_brutal_shadow(self.btn_export, t.acid_cyan, offset=4)
         self.btn_export.clicked.connect(self._start_export)
+        self._set_tip("btn_export", self.btn_export)
 
         controls_row.addWidget(self.btn_play)
         controls_row.addWidget(self.btn_step)
@@ -938,11 +1021,7 @@ class BZGuiWindow(QMainWindow):
         field = self.simulator.step_frame()
         rgb = self.simulator.render_rgb_array(field, smooth_preview=True)
         self.canvas.update_frame(rgb)
-        if self._worker is None or not self._worker.isRunning():
-            self.lbl_status.setText(
-                f"LIVE // GRID {self.simulator.width}×{self.simulator.height} // "
-                f"STEP #{self.simulator.curr_step:04d} // SPEED {self.simulator.config.speed:.2f}X"
-            )
+        self._refresh_status_label()
 
     def _render_current(self) -> None:
         rgb = self.simulator.render_rgb_array(smooth_preview=True)

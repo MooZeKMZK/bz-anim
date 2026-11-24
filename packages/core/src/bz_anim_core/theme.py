@@ -186,5 +186,46 @@ def load_theme_file(path: str | Path | None = None) -> ThemeConfig:
     return ACTIVE_THEME
 
 
+# Shared human-friendly hover tooltip descriptions for every option and action in TUI & GUI
+OPTION_TOOLTIPS: dict[str, str] = {
+    "output_path": "Destination file path for the exported animated GIF (e.g. bz_reaction.gif).",
+    "size": "Simulation grid & output GIF resolution in pixels (Width × Height). Square grids keep spiral propagation isotropic.",
+    "length": "Duration of the final seamlessly looping GIF animation in seconds.",
+    "framerate": "Output playback speed in frames per second (FPS).",
+    "palette_mode": "Toggle between a 2-stop custom color gradient and a realistic 5-stop Ferroin chemical 1D LUT (deep rust-red resting medium -> pale lavender fringe -> cobalt-blue & cyan oxidized wavefronts).",
+    "bg_color": "Resting chemical medium background color (hex code like #0b132b, color name, or R,G,B).",
+    "rings_color": "Peak oxidized wavefront ring color (hex code like #00f5d4, color name, or R,G,B).",
+    "colors": "Number of discrete color shades in the quantized GIF palette (2..256). Fewer shades compress smaller.",
+    "pixel_size": "Raster pixel block size (1 = full resolution, >1 downsamples into chunky retro pixel blocks with toroidal wrap).",
+    "palette_gamma": "Gamma curve exponent applied when generating the color palette ramp (default 1.15).",
+    "contrast_gamma": "Field quantization contrast exponent (>1 darkens resting wake noise and sharpens wavefront rings).",
+    "speed": "Reaction simulation speed multiplier per rendered frame (e.g. 0.5x for slow motion, 2.0x for fast evolution).",
+    "alpha": "Autocatalytic reaction rate α for species A consuming B (A + B -> 2A, default 1.2).",
+    "beta": "Autocatalytic reaction rate β for species B consuming C (B + C -> 2B, default 1.0).",
+    "gamma": "Autocatalytic reaction rate γ for species C consuming A (C + A -> 2C, default 1.0).",
+    "warmup_steps": "Initial simulation steps run before recording frame 0 so random noise develops into well-formed spiral waves.",
+    "seed": "Deterministic random number generator seed for initial nucleation points (-1 or empty for a random dish each reset).",
+    "seamless_loop": "Hide the temporal loop seam using an expanding high-intensity chemical oxidation trigger pulse that blends tail frames (N..N+K-1) into start frames (0..K-1) before LUT color mapping.",
+    "tileable": "Enforce strict 2D torus periodic wrap-around across all neighborhood convolutions, pulse distances, 4D torus noise, downsampling, and delta despeckling so the output tiles infinitely with zero edge seams.",
+    "loop_wipe_ratio": "Fraction of the loop duration (0.05..0.95) over which the chemical oxidation trigger pulse sweeps across the canvas (default 0.28).",
+    "pulse_count": "Number of staggered anti-grid radial oxidation pulses triggered across the 2D torus so expanding rings merge organically instead of forming a centered grid.",
+    "pulse_speed": "Propagation speed of the oxidation trigger pulse relative to underlying spiral waves (default 1.45).",
+    "pulse_noise_amp": "Amplitude of 4D toroidal Perlin/Fourier wavefront distortion noise that warps the pulse ring organically without boundary seams.",
+    "optimize": "Enable GIF delta-frame transparency and LZW horizontal run-length optimizations for drastically smaller files.",
+    "despeckle": "Suppress isolated 1-cell inter-frame delta speckles and bridge 1-cell horizontal gaps to boost LZW compression.",
+    "snap_steps": "Snap frames to discrete simulation steps when step advance <= 1.0 instead of sub-step linear interpolation.",
+    "scanline_smooth": "Horizontal scanline neighbor smoothing weight (0.0..0.5) applied before quantization to lengthen LZW runs.",
+    "diff_threshold": "Inter-frame palette index difference tolerance (0..32) below which pixels reuse the previous frame's state.",
+    "bg_snap_threshold": "Threshold factor that snaps decaying background wake cells cleanly back to palette index 0.",
+    "config_toml": "Load or save all simulation parameters to a structured TOML configuration file (config.toml).",
+    "theme_toml": "Load or save Neo-Brutalist UI surface and accent colors to a TOML theme file (theme.toml).",
+    "btn_play": "Toggle live reaction simulation playback in the viewport (Space).",
+    "btn_step": "Pause playback and advance the reaction simulation by exactly one frame interval.",
+    "btn_view": "Cycle terminal viewport rendering mode: 2×4 Braille Sub-Pixel, Soft Pixels, Smooth Half-Block, or Soft Orb Matrix (V).",
+    "btn_reset": "Apply current sidebar parameters, re-seed the chemical dish, and run warmup steps (R).",
+    "btn_export": "Render the full seamlessly looping, tileable Belousov-Zhabotinsky animation and save it as an optimized GIF (E).",
+}
+
+
 # Auto-load default theme.toml if present on import
 load_theme_file(None)

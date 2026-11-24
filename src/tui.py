@@ -509,7 +509,7 @@ def build_tui_css(theme: ThemeConfig | None = None) -> str:
 
     #controls-row Button {{
         margin-right: 1;
-        min-width: 15;
+        min-width: 11;
         height: 3;
         text-style: bold;
         border: heavy {t.paper};
@@ -565,6 +565,15 @@ def build_tui_css(theme: ThemeConfig | None = None) -> str:
         padding: 0 2;
         text-style: bold;
     }}
+
+    Tooltip {{
+        background: {t.ink};
+        color: {t.acid_yellow};
+        border: heavy {t.acid_cyan};
+        padding: 0 1;
+        text-style: bold;
+        max-width: 56;
+    }}
     """
 
 
@@ -574,6 +583,7 @@ class BZTuiApp(App):
     TITLE = APP_TITLE
     SUB_TITLE = APP_SUBTITLE
     CSS = build_tui_css()
+    TOOLTIP_DELAY = 0.25
 
     BINDINGS = [
         Binding("space", "toggle_play", "PLAY/PAUSE"),
@@ -602,6 +612,7 @@ class BZTuiApp(App):
         self.simulator = BZSimulator(self._make_preview_config(self.config))
         self._timer = None
         self._exporting = False
+        self._active_tip: str | None = None
 
     @staticmethod
     def _make_preview_config(cfg: SimulationConfig) -> SimulationConfig:
@@ -651,10 +662,37 @@ class BZTuiApp(App):
             tileable=cfg.tileable,
         )
 
+    @staticmethod
+    def _field_row(label_text: str, value_str: str, input_id: str, tip_key: str) -> Horizontal:
+        """Build a labeled input row with a hover tooltip on both the label and input field."""
+        import theme as theme_mod
+
+        tip = theme_mod.OPTION_TOOLTIPS.get(tip_key, "")
+        lbl = Label(label_text, classes="field-label")
+        inp = Input(value_str, id=input_id, classes="field-input")
+        row = Horizontal(lbl, inp, classes="field-row")
+        if tip:
+            lbl.tooltip = tip
+            inp.tooltip = tip
+            row.tooltip = tip
+        return row
+
+    @staticmethod
+    def _checkbox(label_text: str, checked: bool, cb_id: str, tip_key: str) -> Checkbox:
+        """Build a Neo-Brutalist Checkbox with a hover tooltip description."""
+        import theme as theme_mod
+
+        cb = Checkbox(label_text, value=checked, id=cb_id)
+        tip = theme_mod.OPTION_TOOLTIPS.get(tip_key, "")
+        if tip:
+            cb.tooltip = tip
+        return cb
+
     def compose(self) -> ComposeResult:
         import theme as theme_mod
 
         t = theme_mod.ACTIVE_THEME
+        tips = theme_mod.OPTION_TOOLTIPS
         yield Static(
             f"■ {t.app_title}   //   {t.app_subtitle}   [NEO-BRUTALIST TUI]",
             id="top-banner",
@@ -663,111 +701,75 @@ class BZTuiApp(App):
             with VerticalScroll(id="sidebar"):
                 with Container(classes="brutal-card"):
                     yield Label(t.section_canvas, classes="section-tag")
-                    with Horizontal(classes="field-row"):
-                        yield Label("OUTPUT GIF", classes="field-label")
-                        yield Input(str(self.config.output_path), id="in-output", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("SIZE (WxH)", classes="field-label")
-                        size_str = (
-                            f"{self.config.size[0]}x{self.config.size[1]}"
-                            if isinstance(self.config.size, tuple)
-                            else str(self.config.size)
-                        )
-                        yield Input(size_str, id="in-size", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("LENGTH (S)", classes="field-label")
-                        yield Input(str(self.config.length), id="in-length", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("FRAMERATE", classes="field-label")
-                        yield Input(str(self.config.framerate), id="in-framerate", classes="field-input")
+                    yield self._field_row("OUTPUT GIF", str(self.config.output_path), "in-output", "output_path")
+                    size_str = (
+                        f"{self.config.size[0]}x{self.config.size[1]}"
+                        if isinstance(self.config.size, tuple)
+                        else str(self.config.size)
+                    )
+                    yield self._field_row("SIZE (WxH)", size_str, "in-size", "size")
+                    yield self._field_row("LENGTH (S)", str(self.config.length), "in-length", "length")
+                    yield self._field_row("FRAMERATE", str(self.config.framerate), "in-framerate", "framerate")
 
                 with Container(classes="brutal-card"):
                     yield Label(t.section_colors, classes="section-tag-yellow")
-                    yield Checkbox(
+                    yield self._checkbox(
                         "FERROIN 1D LUT MODE",
-                        value=(self.config.palette_mode == "ferroin"),
-                        id="cb-ferroin",
+                        self.config.palette_mode == "ferroin",
+                        "cb-ferroin",
+                        "palette_mode",
                     )
-                    with Horizontal(classes="field-row"):
-                        yield Label("BG COLOR", classes="field-label")
-                        yield Input(str(self.config.bg_color), id="in-bg-color", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("RINGS COLOR", classes="field-label")
-                        yield Input(str(self.config.rings_color), id="in-rings-color", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("SHADES", classes="field-label")
-                        yield Input(str(self.config.colors), id="in-colors", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("PIXEL SIZE", classes="field-label")
-                        yield Input(str(self.config.pixel_size), id="in-pixel-size", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("PAL GAMMA", classes="field-label")
-                        yield Input(str(self.config.palette_gamma), id="in-palette-gamma", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("CNT GAMMA", classes="field-label")
-                        yield Input(str(self.config.contrast_gamma), id="in-contrast-gamma", classes="field-input")
+                    yield self._field_row("BG COLOR", str(self.config.bg_color), "in-bg-color", "bg_color")
+                    yield self._field_row("RINGS COLOR", str(self.config.rings_color), "in-rings-color", "rings_color")
+                    yield self._field_row("SHADES", str(self.config.colors), "in-colors", "colors")
+                    yield self._field_row("PIXEL SIZE", str(self.config.pixel_size), "in-pixel-size", "pixel_size")
+                    yield self._field_row("PAL GAMMA", str(self.config.palette_gamma), "in-palette-gamma", "palette_gamma")
+                    yield self._field_row("CNT GAMMA", str(self.config.contrast_gamma), "in-contrast-gamma", "contrast_gamma")
 
                 with Container(classes="brutal-card"):
                     yield Label(t.section_kinetics, classes="section-tag-magenta")
-                    with Horizontal(classes="field-row"):
-                        yield Label("SPEED (X)", classes="field-label")
-                        yield Input(str(self.config.speed), id="in-speed", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("ALPHA A+B", classes="field-label")
-                        yield Input(str(self.config.alpha), id="in-alpha", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("BETA B+C", classes="field-label")
-                        yield Input(str(self.config.beta), id="in-beta", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("GAMMA C+A", classes="field-label")
-                        yield Input(str(self.config.gamma), id="in-gamma", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("WARMUP", classes="field-label")
-                        yield Input(str(self.config.warmup_steps), id="in-warmup", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("RNG SEED", classes="field-label")
-                        yield Input(
-                            "" if self.config.seed is None else str(self.config.seed),
-                            id="in-seed",
-                            classes="field-input",
-                        )
+                    yield self._field_row("SPEED (X)", str(self.config.speed), "in-speed", "speed")
+                    yield self._field_row("ALPHA A+B", str(self.config.alpha), "in-alpha", "alpha")
+                    yield self._field_row("BETA B+C", str(self.config.beta), "in-beta", "beta")
+                    yield self._field_row("GAMMA C+A", str(self.config.gamma), "in-gamma", "gamma")
+                    yield self._field_row("WARMUP", str(self.config.warmup_steps), "in-warmup", "warmup_steps")
+                    yield self._field_row(
+                        "RNG SEED",
+                        "" if self.config.seed is None else str(self.config.seed),
+                        "in-seed",
+                        "seed",
+                    )
 
                 with Container(classes="brutal-card"):
                     yield Label("04 // SEAMLESS LOOP & TORUS", classes="section-tag")
-                    yield Checkbox("SEAMLESS PULSE WIPE LOOP", value=self.config.seamless_loop, id="cb-seamless-loop")
-                    yield Checkbox("2D TORUS SPATIAL TILING", value=self.config.tileable, id="cb-tileable")
-                    with Horizontal(classes="field-row"):
-                        yield Label("WIPE RATIO", classes="field-label")
-                        yield Input(str(self.config.loop_wipe_ratio), id="in-wipe-ratio", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("PULSES (N)", classes="field-label")
-                        yield Input(str(self.config.pulse_count), id="in-pulse-count", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("PULSE SPD", classes="field-label")
-                        yield Input(str(self.config.pulse_speed), id="in-pulse-speed", classes="field-input")
-                    with Horizontal(classes="field-row"):
-                        yield Label("4D NOISE", classes="field-label")
-                        yield Input(str(self.config.pulse_noise_amp), id="in-pulse-noise", classes="field-input")
+                    yield self._checkbox("SEAMLESS PULSE WIPE LOOP", self.config.seamless_loop, "cb-seamless-loop", "seamless_loop")
+                    yield self._checkbox("2D TORUS SPATIAL TILING", self.config.tileable, "cb-tileable", "tileable")
+                    yield self._field_row("WIPE RATIO", str(self.config.loop_wipe_ratio), "in-wipe-ratio", "loop_wipe_ratio")
+                    yield self._field_row("PULSES (N)", str(self.config.pulse_count), "in-pulse-count", "pulse_count")
+                    yield self._field_row("PULSE SPD", str(self.config.pulse_speed), "in-pulse-speed", "pulse_speed")
+                    yield self._field_row("4D NOISE", str(self.config.pulse_noise_amp), "in-pulse-noise", "pulse_noise_amp")
 
                 with Container(classes="brutal-card"):
                     yield Label(t.section_optimize, classes="section-tag-lime")
-                    yield Checkbox("DELTA / LZW OPTIMIZE", value=self.config.optimize, id="cb-optimize")
-                    yield Checkbox("DESPECKLE CELL DELTAS", value=self.config.despeckle, id="cb-despeckle")
-                    yield Checkbox("SNAP DISCRETE STEPS", value=self.config.snap_steps, id="cb-snap-steps")
+                    yield self._checkbox("DELTA / LZW OPTIMIZE", self.config.optimize, "cb-optimize", "optimize")
+                    yield self._checkbox("DESPECKLE CELL DELTAS", self.config.despeckle, "cb-despeckle", "despeckle")
+                    yield self._checkbox("SNAP DISCRETE STEPS", self.config.snap_steps, "cb-snap-steps", "snap_steps")
 
                 with Container(classes="brutal-card"):
                     yield Label("06 // TOML CONFIG & THEME", classes="section-tag-blue")
-                    with Horizontal(classes="field-row"):
-                        yield Label("CONFIG TOML", classes="field-label")
-                        yield Input(self.config_path, id="in-config-toml", classes="field-input")
+                    yield self._field_row("CONFIG TOML", self.config_path, "in-config-toml", "config_toml")
                     with Horizontal(classes="toml-btn-row"):
-                        yield Button("LOAD CFG", id="btn-load-cfg")
-                        yield Button("SAVE CFG", id="btn-save-cfg")
-                    with Horizontal(classes="field-row"):
-                        yield Label("THEME TOML", classes="field-label")
-                        yield Input(self.theme_path, id="in-theme-toml", classes="field-input")
+                        btn_load_cfg = Button("LOAD CFG", id="btn-load-cfg")
+                        btn_load_cfg.tooltip = tips["config_toml"]
+                        btn_save_cfg = Button("SAVE CFG", id="btn-save-cfg")
+                        btn_save_cfg.tooltip = tips["config_toml"]
+                        yield btn_load_cfg
+                        yield btn_save_cfg
+                    yield self._field_row("THEME TOML", self.theme_path, "in-theme-toml", "theme_toml")
                     with Horizontal(classes="toml-btn-row"):
-                        yield Button("SAVE THEME", id="btn-save-theme")
+                        btn_save_theme = Button("SAVE THEME", id="btn-save-theme")
+                        btn_save_theme.tooltip = tips["theme_toml"]
+                        yield btn_save_theme
 
             with Vertical(id="main-panel"):
                 yield Static(
@@ -776,11 +778,21 @@ class BZTuiApp(App):
                 )
                 yield BZCanvas(self.simulator, id="bz-canvas")
                 with Horizontal(id="controls-row"):
-                    yield Button("❚❚ PAUSE", id="btn-play")
-                    yield Button("⏭ STEP", id="btn-step")
-                    yield Button("◈ VIEW MODE", id="btn-view")
-                    yield Button("↺ APPLY & RESET", id="btn-reset")
-                    yield Button("⬇ EXPORT GIF", id="btn-export")
+                    btn_play = Button("❚❚ PAUSE", id="btn-play")
+                    btn_play.tooltip = tips["btn_play"]
+                    btn_step = Button("⏭ STEP", id="btn-step")
+                    btn_step.tooltip = tips["btn_step"]
+                    btn_view = Button("◈ VIEW MODE", id="btn-view")
+                    btn_view.tooltip = tips["btn_view"]
+                    btn_reset = Button("↺ APPLY & RESET", id="btn-reset")
+                    btn_reset.tooltip = tips["btn_reset"]
+                    btn_export = Button("⬇ EXPORT GIF", id="btn-export")
+                    btn_export.tooltip = tips["btn_export"]
+                    yield btn_play
+                    yield btn_step
+                    yield btn_view
+                    yield btn_reset
+                    yield btn_export
                 with Horizontal(id="telemetry-box"):
                     yield Static("STATUS // READY", id="status-bar")
                     yield ProgressBar(total=100, show_eta=False, id="export-progress")
@@ -793,6 +805,43 @@ class BZTuiApp(App):
         interval = 1.0 / max(1, min(30, self.config.framerate))
         self._timer = self.set_interval(interval, self._tick_simulation)
 
+    def _resolve_widget_tip(self, widget: Widget | None) -> str | None:
+        node = widget
+        while isinstance(node, Widget):
+            if node.tooltip:
+                return str(node.tooltip)
+            node = node.parent  # type: ignore[assignment]
+        return None
+
+    def _update_status_bar(self) -> None:
+        if self._exporting:
+            return
+        status = self.query_one("#status-bar", Static)
+        if self._active_tip:
+            status.update(f"INFO // {self._active_tip}")
+        else:
+            state = "LIVE" if self.is_playing else "PAUSED"
+            status.update(
+                f"{state} // GRID {self.simulator.width}x{self.simulator.height} // "
+                f"STEP #{self.simulator.curr_step:04d} // SPEED {self.simulator.config.speed:.2f}X"
+            )
+
+    def on_mouse_move(self, event) -> None:
+        try:
+            widget, _ = self.screen.get_widget_at(event.screen_x, event.screen_y)
+        except Exception:
+            widget = None
+        tip = self._resolve_widget_tip(widget)
+        if tip != self._active_tip:
+            self._active_tip = tip
+            self._update_status_bar()
+
+    def on_descendant_focus(self, event) -> None:
+        tip = self._resolve_widget_tip(getattr(event, "widget", None))
+        if tip:
+            self._active_tip = tip
+            self._update_status_bar()
+
     def _tick_simulation(self) -> None:
         if not self.is_playing:
             return
@@ -801,12 +850,7 @@ class BZTuiApp(App):
         canvas._active_field = field
         canvas.step_count = self.simulator.frame_idx
         canvas.refresh()
-        status = self.query_one("#status-bar", Static)
-        if not self._exporting:
-            status.update(
-                f"LIVE // GRID {self.simulator.width}x{self.simulator.height} // "
-                f"STEP #{self.simulator.curr_step:04d} // SPEED {self.simulator.config.speed:.2f}X"
-            )
+        self._update_status_bar()
 
     def _populate_inputs_from_config(self, cfg: SimulationConfig) -> None:
         """Update all sidebar input widgets from `cfg`."""
