@@ -1,0 +1,32 @@
+# Belousov-Zhabotinsky Reaction-Diffusion Simulation Options (config.toml)
+
+[canvas]
+output_path = "bz_reaction.gif"
+size = "320x320"
+length = 5.0
+framerate = 20
+
+[palette]
+bg_color = "#0b132b"
+rings_color = "#00f5d4"
+colors = 10
+pixel_size = 1
+palette_gamma = 1.15
+contrast_gamma = 1.15
+
+[kinetics]
+speed = 1.0
+alpha = 1.2
+beta = 1.0
+gamma = 1.0
+warmup_steps = 65
+seed = 42  # Use -1 for random seed
+# steps_per_frame = 2.0  # Optional override (uncomment to set explicit steps/frame)
+
+[compression]
+optimize = true
+despeckle = true
+snap_steps = true
+scanline_smooth = 0.15
+diff_threshold = 1
+bg_snap_threshold = 0.25

@@ -1,0 +1,23 @@
+# Neo-Brutalist UI Theme Configuration for bz-anim (TUI & GUI)
+
+[surfaces]
+ink = "#161821"          # Deep base & hard drop-shadow ink
+surface = "#1e212d"      # Sidebar background
+panel = "#262a38"        # Elevated card surface
+paper = "#e8e4dc"        # Crisp borders & primary text
+muted = "#9499ad"        # Secondary labels
+
+[accents]
+acid_cyan = "#5bc0be"     # Canvas header & Play button
+acid_yellow = "#e9c46a"   # Top banner, Palette header & Reset button
+hot_magenta = "#e07a5f"   # Kinetics header & Progress bar fill
+acid_lime = "#81b29a"     # Compression header & Export button
+electric_blue = "#729fcf" # TOML config header & secondary accent
+
+[titles]
+app_title = "BZ-ANIM // BELOUSOV-ZHABOTINSKY LAB"
+app_subtitle = "2D REACTION-DIFFUSION ENGINE"
+section_canvas = "01 // OUTPUT & CANVAS"
+section_colors = "02 // PALETTE & RASTER"
+section_kinetics = "03 // REACTION KINETICS"
+section_optimize = "04 // LZW & DELTA COMPRESSION"
