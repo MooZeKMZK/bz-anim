@@ -1,16 +1,17 @@
-# Maintainer: moozek
+# Maintainer: MooZeKMZK <mooz.05@hotmail.com>
 pkgbase=bz-anim
 pkgname=(
   'python-bz-anim-core'
   'bz-anim-cli'
   'bz-anim-tui'
   'bz-anim-gui'
+  'bz-anim'
 )
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="2D Belousov-Zhabotinsky reaction-diffusion simulator (core, CLI, Textual TUI, PySide6 GUI)"
 arch=('any')
-url="https://github.com/moozek/bz-anim"
+url="https://github.com/MooZeKMZK/bz-anim"
 license=('MIT')
 makedepends=(
   'python-build'
@@ -28,6 +29,7 @@ build() {
     python -m build --wheel --no-isolation
     popd > /dev/null
   done
+  python -m build --wheel --no-isolation
 }
 
 package_python-bz-anim-core() {
@@ -65,4 +67,16 @@ package_bz-anim-gui() {
   python -m installer --destdir="${pkgdir}" packages/gui/dist/*.whl
   install -Dm644 packaging/desktop/bz-anim.desktop "${pkgdir}/usr/share/applications/bz-anim.desktop"
   install -Dm644 packaging/desktop/bz-anim.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/bz-anim.svg"
+}
+
+package_bz-anim() {
+  pkgdesc="Unified umbrella dispatcher (bz-anim) for the Belousov-Zhabotinsky reaction-diffusion simulator"
+  depends=('python-bz-anim-core' 'bz-anim-cli')
+  optdepends=(
+    'bz-anim-tui: Neo-Brutalist Textual terminal UI (--tui)'
+    'bz-anim-gui: Neo-Brutalist PySide6 desktop GUI (--gui)'
+  )
+
+  cd "${srcdir}/${pkgbase}-${pkgver}"
+  python -m installer --destdir="${pkgdir}" dist/*.whl
 }

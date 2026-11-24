@@ -1,0 +1,259 @@
+name: Build & Release Packages (AUR, DEB, RPM/RPK, Windows)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.1.0)"
+        required: false
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-version:
+    name: Resolve Release Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag: ${{ steps.get_version.outputs.tag }}
+    steps:
+      - name: Determine version string
+        id: get_version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            RAW_TAG="${GITHUB_REF#refs/tags/}"
+            VER="${RAW_TAG#v}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            VER="${{ github.event.inputs.version }}"
+            VER="${VER#v}"
+            RAW_TAG="v${VER}"
+          else
+            VER="0.1.0"
+            RAW_TAG="v0.1.0"
+          fi
+          echo "version=${VER}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${RAW_TAG}" >> "${GITHUB_OUTPUT}"
+
+  build-deb:
+    name: Build Debian (.deb) Packages
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev
+          python3 -m pip install --upgrade pip build setuptools wheel
+
+      - name: Build modular .deb packages
+        run: |
+          chmod +x packaging/deb/build-deb.sh
+          ./packaging/deb/build-deb.sh "${{ needs.resolve-version.outputs.version }}" dist/deb
+
+      - name: Upload .deb artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-packages
+          path: dist/deb/*.deb
+
+  build-rpm-rpk:
+    name: Build RPM (.rpm / .rpk) Packages
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:40
+    steps:
+      - name: Install Fedora RPM build tools
+        run: |
+          dnf install -y git rpm-build python3-devel python3-pip python3-setuptools python3-wheel tar
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build modular .rpm and .rpk packages
+        run: |
+          chmod +x packaging/rpm/build-rpm.sh
+          ./packaging/rpm/build-rpm.sh "${{ needs.resolve-version.outputs.version }}" dist/rpm
+
+      - name: Upload .rpm and .rpk artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-rpk-packages
+          path: |
+            dist/rpm/*.rpm
+            dist/rpm/*.rpk
+
+  build-aur:
+    name: Build Arch Linux / AUR Packages & .SRCINFO
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Install Arch build dependencies
+        run: |
+          pacman -Syu --noconfirm git python python-build python-installer python-setuptools python-wheel python-numpy python-pillow
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare non-root builder user and build Arch packages
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          VER="${{ needs.resolve-version.outputs.version }}"
+          BUILD_DIR="/home/builder/aur-build"
+          mkdir -p "${BUILD_DIR}" /workspace/dist/aur
+
+          # Create local source archive matching PKGBUILD source expectation
+          STAGE_SRC="$(mktemp -d)"
+          mkdir -p "${STAGE_SRC}/bz-anim-${VER}"
+          cp -a pyproject.toml config.toml theme.toml src packages packaging "${STAGE_SRC}/bz-anim-${VER}/"
+          tar -C "${STAGE_SRC}" -czf "${BUILD_DIR}/bz-anim-${VER}.tar.gz" "bz-anim-${VER}"
+          rm -rf "${STAGE_SRC}"
+
+          cp packaging/aur/PKGBUILD "${BUILD_DIR}/PKGBUILD"
+          sed -i "s/^pkgver=.*/pkgver=${VER}/" "${BUILD_DIR}/PKGBUILD"
+          chown -R builder:builder "${BUILD_DIR}"
+
+          su builder -c "cd '${BUILD_DIR}' && makepkg --nodeps --noconfirm && makepkg --printsrcinfo > .SRCINFO"
+          cp -v "${BUILD_DIR}"/*.pkg.tar.zst /workspace/dist/aur/ || cp -v "${BUILD_DIR}"/*.pkg.tar.* "${GITHUB_WORKSPACE}/dist/aur/"
+          mkdir -p "${GITHUB_WORKSPACE}/dist/aur"
+          cp -v "${BUILD_DIR}"/*.pkg.tar.* "${GITHUB_WORKSPACE}/dist/aur/"
+          cp -v "${BUILD_DIR}/PKGBUILD" "${GITHUB_WORKSPACE}/dist/aur/PKGBUILD"
+          cp -v "${BUILD_DIR}/.SRCINFO" "${GITHUB_WORKSPACE}/dist/aur/.SRCINFO"
+
+      - name: Publish to AUR (if AUR_SSH_PRIVATE_KEY secret is configured)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+        run: |
+          if [[ -z "${AUR_SSH_PRIVATE_KEY}" ]]; then
+            echo "AUR_SSH_PRIVATE_KEY secret not set; skipping automatic push to aur.archlinux.org."
+            exit 0
+          fi
+          pacman -S --noconfirm openssh
+          mkdir -p /home/builder/.ssh
+          echo "${AUR_SSH_PRIVATE_KEY}" > /home/builder/.ssh/aur
+          chmod 600 /home/builder/.ssh/aur
+          cat > /home/builder/.ssh/config <<EOF
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+            StrictHostKeyChecking accept-new
+          EOF
+          chown -R builder:builder /home/builder/.ssh
+
+          su builder -c "
+            git clone ssh://aur@aur.archlinux.org/bz-anim.git /home/builder/aur-repo
+            cp '${GITHUB_WORKSPACE}/dist/aur/PKGBUILD' /home/builder/aur-repo/PKGBUILD
+            cp '${GITHUB_WORKSPACE}/dist/aur/.SRCINFO' /home/builder/aur-repo/.SRCINFO
+            cd /home/builder/aur-repo
+            git config user.name '${AUR_USERNAME:-MooZeKMZK}'
+            git config user.email '${AUR_EMAIL:-mooz.05@hotmail.com}'
+            git add PKGBUILD .SRCINFO
+            git diff --cached --quiet || (git commit -m 'Release v${{ needs.resolve-version.outputs.version }}' && git push origin master)
+          "
+
+      - name: Upload Arch / AUR artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aur-packages
+          path: |
+            dist/aur/*.pkg.tar.*
+            dist/aur/PKGBUILD
+            dist/aur/.SRCINFO
+
+  build-windows:
+    name: Build Windows Standalone Executables & Wheels
+    needs: resolve-version
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies and PyInstaller
+        run: |
+          python -m pip install --upgrade pip build wheel setuptools pyinstaller
+          python -m pip install -r requirements.txt
+
+      - name: Build Python wheels
+        run: |
+          python -m build --wheel --outdir dist/wheels packages/core
+          python -m build --wheel --outdir dist/wheels packages/cli
+          python -m build --wheel --outdir dist/wheels packages/tui
+          python -m build --wheel --outdir dist/wheels packages/gui
+          python -m build --wheel --outdir dist/wheels .
+
+      - name: Build standalone Windows executables (.exe) and portable ZIP
+        run: |
+          python packaging/windows/build_windows.py "${{ needs.resolve-version.outputs.version }}"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: |
+            dist/*.zip
+            dist/bz-anim-windows-x86_64/*.exe
+            dist/wheels/*.whl
+
+  github-release:
+    name: Publish GitHub Release
+    needs:
+      - resolve-version
+      - build-deb
+      - build-rpm-rpk
+      - build-aur
+      - build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd release-assets
+          sha256sum *.deb *.rpm *.rpk *.pkg.tar.* *.zip *.exe *.whl > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-version.outputs.tag }}
+          name: "bz-anim ${{ needs.resolve-version.outputs.tag }}"
+          generate_release_notes: true
+          files: |
+            release-assets/*.deb
+            release-assets/*.rpm
+            release-assets/*.rpk
+            release-assets/*.pkg.tar.*
+            release-assets/PKGBUILD
+            release-assets/.SRCINFO
+            release-assets/*.zip
+            release-assets/*.exe
+            release-assets/*.whl
+            release-assets/SHA256SUMS.txt
