@@ -199,24 +199,22 @@ jobs:
 
       - name: Build Python wheels
         run: |
-          python -m build --wheel --outdir dist/wheels packages/core
-          python -m build --wheel --outdir dist/wheels packages/cli
-          python -m build --wheel --outdir dist/wheels packages/tui
-          python -m build --wheel --outdir dist/wheels packages/gui
-          python -m build --wheel --outdir dist/wheels .
+          python -m build --wheel --outdir dist/windows-release packages/core
+          python -m build --wheel --outdir dist/windows-release packages/cli
+          python -m build --wheel --outdir dist/windows-release packages/tui
+          python -m build --wheel --outdir dist/windows-release packages/gui
+          python -m build --wheel --outdir dist/windows-release .
 
       - name: Build standalone Windows executables (.exe) and portable ZIP
         run: |
           python packaging/windows/build_windows.py "${{ needs.resolve-version.outputs.version }}"
+          python -c "import pathlib, shutil; out = pathlib.Path('dist/windows-release'); out.mkdir(parents=True, exist_ok=True); [shutil.copy2(p, out / p.name) for p in list(pathlib.Path('dist').glob('*.zip')) + list(pathlib.Path('dist/bz-anim-windows-x86_64').glob('*.exe'))]"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-binaries
-          path: |
-            dist/*.zip
-            dist/bz-anim-windows-x86_64/*.exe
-            dist/wheels/*.whl
+          path: dist/windows-release/*
 
   github-release:
     name: Publish GitHub Release
@@ -235,9 +233,12 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: Generate SHA256SUMS
+      - name: Flatten release assets and generate SHA256SUMS
         run: |
+          find release-assets -mindepth 2 -type f -exec mv -f {} release-assets/ \;
+          find release-assets -mindepth 1 -type d -empty -delete
           cd release-assets
+          ls -la
           sha256sum *.deb *.rpm *.rpk *.pkg.tar.* *.zip *.exe *.whl > SHA256SUMS.txt
 
       - name: Create GitHub Release
